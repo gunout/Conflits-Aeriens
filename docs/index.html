@@ -5,14 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Radar Aérien France — Surveillance open source</title>
 
-<!-- ============================================================
-     ⚙️ CONFIGURATION — REMPLACEZ PAR VOTRE URL RENDER
-     ============================================================ -->
-<script>
-    window.RADAR_CONFIG = {
-        BACKEND_URL: 'https://radar-aerien-backend.onrender.com'
-    };
-</script>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
@@ -23,20 +16,15 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
 
-<!-- ✅ Socket.IO client depuis CDN officiel -->
-<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
-
 <style>
 :root {
     --blue-france: #000091;
-    --blue-france-hover: #1212FF;
     --blue-light: #F5F5FE;
     --blue-mid: #E3E3FD;
     --red-marianne: #E1000F;
     --red-light: #FDEFF2;
     --green: #18753C;
     --green-light: #B8FEC9;
-    --yellow: #716043;
     --orange: #B34000;
     --grey-50: #161616;
     --grey-200: #3A3A3A;
@@ -50,7 +38,6 @@
     --text-mention: var(--grey-425);
     --border: var(--grey-925);
     --radius: 4px;
-    --shadow: 0 4px 12px rgba(0,0,0,0.08);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { font-size: 16px; }
@@ -61,15 +48,8 @@ body {
 }
 
 .fr-header { background: var(--white); border-bottom: 1px solid var(--border); }
-.fr-header__top {
-    background: var(--blue-france); color: var(--white);
-    padding: 6px 0; font-size: 0.75rem; text-align: center;
-}
-.fr-header__top a { color: var(--white); text-decoration: underline; }
-.fr-header__main {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 1rem 0; gap: 1rem; flex-wrap: wrap;
-}
+.fr-header__top { background: var(--blue-france); color: var(--white); padding: 6px 0; font-size: 0.75rem; text-align: center; }
+.fr-header__main { display: flex; align-items: center; justify-content: space-between; padding: 1rem 0; gap: 1rem; flex-wrap: wrap; }
 .fr-header__brand { display: flex; align-items: center; gap: 0.75rem; text-decoration: none; color: var(--text-title); }
 .fr-header__brand-logo {
     width: 44px; height: 44px; background: var(--blue-france); color: var(--white);
@@ -90,7 +70,6 @@ body {
 }
 .fr-btn--ghost { background: transparent; border-color: var(--border); color: var(--blue-france); }
 .fr-btn--ghost:hover { background: var(--blue-light); }
-.fr-btn--primary { background: var(--blue-france); color: var(--white); }
 .fr-btn--sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
 .fr-btn--icon { width: 36px; height: 36px; padding: 0; justify-content: center; }
 
@@ -104,22 +83,17 @@ body {
 .fr-disclaimer strong { color: var(--red-marianne); }
 
 .fr-nav { border-bottom: 1px solid var(--border); background: var(--white); }
-.fr-nav__list { display: flex; list-style: none; overflow-x: auto; scrollbar-width: none; }
-.fr-nav__list::-webkit-scrollbar { display: none; }
+.fr-nav__list { display: flex; list-style: none; overflow-x: auto; }
 .fr-nav__link {
     display: block; padding: 1rem 1rem 0.85rem;
     color: var(--text); text-decoration: none; font-size: 0.9rem;
     font-weight: 500; white-space: nowrap;
-    border-bottom: 3px solid transparent;
-    background: none; border-top: none; border-left: none; border-right: none;
+    border-bottom: 3px solid transparent; background: none;
+    border-top: none; border-left: none; border-right: none;
     cursor: pointer; font-family: inherit;
 }
 .fr-nav__link:hover { background: var(--blue-light); }
-.fr-nav__link.active {
-    color: var(--blue-france);
-    border-bottom-color: var(--blue-france);
-    background: var(--blue-light);
-}
+.fr-nav__link.active { color: var(--blue-france); border-bottom-color: var(--blue-france); background: var(--blue-light); }
 
 .fr-container { max-width: 1400px; margin: 0 auto; padding: 0 1rem; }
 main { padding: 1.5rem 0 3rem; }
@@ -158,7 +132,7 @@ main { padding: 1.5rem 0 3rem; }
     border-radius: var(--radius); padding: 1.25rem;
     border-top: 4px solid var(--blue-france); transition: all 0.15s;
 }
-.fr-kpi:hover { box-shadow: var(--shadow); transform: translateY(-2px); }
+.fr-kpi:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); transform: translateY(-2px); }
 .fr-kpi--danger { border-top-color: var(--red-marianne); }
 .fr-kpi--success { border-top-color: var(--green); }
 .fr-kpi--warning { border-top-color: var(--orange); }
@@ -177,9 +151,8 @@ main { padding: 1.5rem 0 3rem; }
     background: var(--grey-950); color: var(--text-mention);
 }
 
-.fr-grid-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; margin-bottom: 1rem; }
 .fr-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
-@media (max-width: 900px) { .fr-grid-2, .fr-grid-3 { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .fr-grid-3 { grid-template-columns: 1fr; } }
 
 .fr-card {
     background: var(--white); border: 1px solid var(--border);
@@ -191,10 +164,7 @@ main { padding: 1.5rem 0 3rem; }
     display: flex; justify-content: space-between; align-items: center;
     gap: 0.5rem; background: var(--blue-light); flex-wrap: wrap;
 }
-.fr-card__title {
-    font-size: 0.95rem; font-weight: 700; color: var(--blue-france);
-    display: flex; align-items: center; gap: 0.5rem;
-}
+.fr-card__title { font-size: 0.95rem; font-weight: 700; color: var(--blue-france); display: flex; align-items: center; gap: 0.5rem; }
 .fr-card__body { padding: 1rem; flex: 1; }
 .fr-card__footer {
     padding: 0.6rem 1rem; border-top: 1px solid var(--border);
@@ -214,7 +184,7 @@ main { padding: 1.5rem 0 3rem; }
     position: absolute; top: 12px; left: 12px;
     background: rgba(0,0,145,0.85); color: #fff;
     padding: 8px 12px; border-radius: 4px; font-size: 0.75rem;
-    z-index: 10; backdrop-filter: blur(6px); line-height: 1.4;
+    z-index: 10; line-height: 1.4;
 }
 .radar-overlay-info strong { color: #64B5F6; }
 .radar-legend {
@@ -239,9 +209,7 @@ main { padding: 1.5rem 0 3rem; }
     background: rgba(0,0,145,0.85); border: 1px solid #64B5F6;
     color: #fff; width: 36px; height: 36px; border-radius: 4px;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
-    transition: all 0.2s;
 }
-.radar-btn:hover { background: #000091; }
 .radar-stats {
     position: absolute; bottom: 12px; left: 12px;
     background: rgba(0,0,145,0.85); color: #fff;
@@ -265,7 +233,6 @@ main { padding: 1.5rem 0 3rem; }
     cursor: pointer; user-select: none; white-space: nowrap;
     position: sticky; top: 0; z-index: 5;
 }
-.fr-table thead th:hover { background: var(--blue-mid); }
 .fr-table tbody td { padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--border); }
 .fr-table tbody tr:hover { background: var(--blue-light); cursor: pointer; }
 
@@ -274,9 +241,6 @@ main { padding: 1.5rem 0 3rem; }
     font-size: 0.7rem; border-radius: 10px;
     font-weight: 600; line-height: 1.4;
 }
-.fr-tag--success { background: var(--green-light); color: var(--green); }
-.fr-tag--warning { background: #FFE9C2; color: var(--yellow); }
-.fr-tag--error { background: #FFE9E6; color: var(--red-marianne); }
 .fr-tag--info { background: var(--blue-mid); color: var(--blue-france); }
 .fr-tag--mil { background: #FFE9FF; color: #B300B3; font-weight: 700; }
 
@@ -298,15 +262,7 @@ main { padding: 1.5rem 0 3rem; }
     margin-top: 3rem; padding: 1.5rem 0;
     font-size: 0.8rem; color: var(--text-mention);
 }
-.fr-footer__top {
-    display: flex; justify-content: space-between;
-    align-items: flex-start; gap: 1rem; flex-wrap: wrap;
-    padding-bottom: 1rem; border-bottom: 1px solid var(--border);
-    margin-bottom: 1rem;
-}
-.fr-footer__brand { display: flex; align-items: center; gap: 0.75rem; color: var(--blue-france); font-weight: 700; }
-.fr-footer__links { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; list-style: none; }
-.fr-footer__links a { color: var(--text); text-decoration: none; font-size: 0.8rem; }
+.fr-footer__brand { display: flex; align-items: center; gap: 0.75rem; color: var(--blue-france); font-weight: 700; margin-bottom: 1rem; }
 
 .fr-spinner {
     width: 14px; height: 14px;
@@ -335,14 +291,10 @@ main { padding: 1.5rem 0 3rem; }
     display: flex; justify-content: space-between; align-items: center;
 }
 .fr-modal__title { font-size: 1.1rem; font-weight: 700; color: var(--text-title); }
-.fr-modal__close {
-    background: none; border: none; font-size: 1.4rem;
-    color: var(--text-mention); cursor: pointer; line-height: 1;
-}
+.fr-modal__close { background: none; border: none; font-size: 1.4rem; color: var(--text-mention); cursor: pointer; line-height: 1; }
 .fr-modal__body { padding: 1.25rem; }
 
 @media (max-width: 640px) {
-    .fr-header__main { padding: 0.75rem 0; }
     .fr-kpi-grid { grid-template-columns: 1fr 1fr; gap: 0.6rem; }
     .fr-kpi { padding: 0.9rem; }
     .fr-kpi__value { font-size: 1.5rem; }
@@ -354,10 +306,7 @@ main { padding: 1.5rem 0 3rem; }
 </head>
 <body>
 
-<div class="fr-header__top">
-    <span>Outil tiers indépendant — </span>
-    <a href="#disclaimer">statut et mentions légales</a>
-</div>
+<div class="fr-header__top">Outil tiers indépendant — <a href="#disclaimer">statut et mentions légales</a></div>
 
 <header class="fr-header">
     <div class="fr-container">
@@ -370,15 +319,9 @@ main { padding: 1.5rem 0 3rem; }
                 </div>
             </a>
             <div class="fr-header__tools">
-                <button class="fr-btn fr-btn--ghost fr-btn--sm" onclick="exportCSV()">
-                    <i class="fas fa-file-csv"></i> <span>CSV</span>
-                </button>
-                <button class="fr-btn fr-btn--ghost fr-btn--sm" onclick="exportPDF()">
-                    <i class="fas fa-file-pdf"></i> <span>PDF</span>
-                </button>
-                <button class="fr-btn fr-btn--ghost fr-btn--sm fr-btn--icon" onclick="showAbout()">
-                    <i class="fas fa-circle-info"></i>
-                </button>
+                <button class="fr-btn fr-btn--ghost fr-btn--sm" onclick="exportCSV()"><i class="fas fa-file-csv"></i> <span>CSV</span></button>
+                <button class="fr-btn fr-btn--ghost fr-btn--sm" onclick="exportPDF()"><i class="fas fa-file-pdf"></i> <span>PDF</span></button>
+                <button class="fr-btn fr-btn--ghost fr-btn--sm fr-btn--icon" onclick="showAbout()"><i class="fas fa-circle-info"></i></button>
             </div>
         </div>
     </div>
@@ -390,7 +333,6 @@ main { padding: 1.5rem 0 3rem; }
             <li><button class="fr-nav__link active" data-tab="overview">Vue d'ensemble</button></li>
             <li><button class="fr-nav__link" data-tab="radar">Radar</button></li>
             <li><button class="fr-nav__link" data-tab="map">Carte</button></li>
-            <li><button class="fr-nav__link" data-tab="sources">Sources</button></li>
         </ul>
     </div>
 </nav>
@@ -409,15 +351,10 @@ main { padding: 1.5rem 0 3rem; }
     <div class="fr-status">
         <span class="fr-status__item">
             <span class="fr-badge-dot fr-badge-dot--wait" id="statusDot"></span>
-            <span id="statusText">Connexion au backend…</span>
+            <span id="statusText">Chargement initial…</span>
         </span>
-        <span class="fr-status__item">
-            <i class="fas fa-clock"></i>
-            MAJ : <strong id="lastUpdate">—</strong>
-        </span>
-        <span class="fr-status__item" id="apiStatus">
-            <i class="fas fa-satellite-dish"></i> Sources : <strong>chargement…</strong>
-        </span>
+        <span class="fr-status__item"><i class="fas fa-clock"></i> MAJ : <strong id="lastUpdate">—</strong></span>
+        <span class="fr-status__item" id="apiStatus"><i class="fas fa-satellite-dish"></i> Sources : <strong>chargement…</strong></span>
         <span class="fr-status__spacer"></span>
         <button class="fr-btn fr-btn--ghost fr-btn--sm" onclick="toggleGeoFilter()">
             <i class="fas fa-vector-square"></i> Filtre géo : <strong id="geoFilterStatus">Inactif</strong>
@@ -455,12 +392,8 @@ main { padding: 1.5rem 0 3rem; }
         <div class="fr-card__header">
             <div class="fr-card__title"><i class="fas fa-crosshairs"></i> Radar ADS-B</div>
             <div style="display:flex;gap:6px;">
-                <button class="fr-btn fr-btn--ghost fr-btn--sm fr-btn--icon" onclick="toggleRadarPause()" id="radarPauseBtn">
-                    <i class="fas fa-pause"></i>
-                </button>
-                <button class="fr-btn fr-btn--ghost fr-btn--sm fr-btn--icon" onclick="cycleRadarRange()">
-                    <i class="fas fa-circle-notch"></i>
-                </button>
+                <button class="fr-btn fr-btn--ghost fr-btn--sm fr-btn--icon" onclick="toggleRadarPause()" id="radarPauseBtn"><i class="fas fa-pause"></i></button>
+                <button class="fr-btn fr-btn--ghost fr-btn--sm fr-btn--icon" onclick="cycleRadarRange()"><i class="fas fa-circle-notch"></i></button>
             </div>
         </div>
         <div class="fr-card__body" style="padding:0;">
@@ -473,9 +406,7 @@ main { padding: 1.5rem 0 3rem; }
                     <div><strong>CIBLES :</strong> <span id="radarTargetCount">0</span></div>
                 </div>
                 <div class="radar-controls">
-                    <button class="radar-btn" onclick="toggleRadarLabels()" title="Labels">
-                        <i class="fas fa-tag"></i>
-                    </button>
+                    <button class="radar-btn" onclick="toggleRadarLabels()" title="Labels"><i class="fas fa-tag"></i></button>
                 </div>
                 <div class="radar-legend">
                     <div><span class="dot dot--civil"></span> Civil</div>
@@ -497,7 +428,6 @@ main { padding: 1.5rem 0 3rem; }
     </div>
 
     <h2 class="fr-section-title"><i class="fas fa-map-location-dot"></i> Carte interactive</h2>
-
     <div class="fr-card" id="mapAnchor" style="margin-bottom:1rem;">
         <div class="fr-card__body" style="padding:0;">
             <div id="map" style="height:500px;width:100%;"></div>
@@ -520,7 +450,6 @@ main { padding: 1.5rem 0 3rem; }
     </div>
 
     <h2 class="fr-section-title"><i class="fas fa-table"></i> Contacts radar</h2>
-
     <div class="fr-card">
         <div class="fr-card__header">
             <div class="fr-card__title"><i class="fas fa-list"></i> Aéronefs</div>
@@ -542,7 +471,7 @@ main { padding: 1.5rem 0 3rem; }
                         </tr>
                     </thead>
                     <tbody id="eventsBody">
-                        <tr><td colspan="5" style="text-align:center;padding:1.5rem;">En attente du backend…</td></tr>
+                        <tr><td colspan="5" style="text-align:center;padding:1.5rem;">Chargement initial…</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -553,46 +482,18 @@ main { padding: 1.5rem 0 3rem; }
         </div>
     </div>
 
-    <h2 class="fr-section-title" id="sourcesAnchor"><i class="fas fa-book"></i> Sources & méthodes</h2>
-    <div class="fr-card">
-        <div class="fr-card__body" style="font-size:0.875rem;line-height:1.7;">
-            <ul style="padding-left:1.25rem;">
-                <li><strong>adsb.lol</strong> — ADS-B civils + flux militaire (<code>/v2/mil</code>)</li>
-                <li><strong>adsb.fi</strong> — Miroir ADS-B européen</li>
-                <li><strong>USGS</strong> — Séismes mondiaux temps réel</li>
-                <li><strong>GDELT</strong> — Actualités mondiales</li>
-                <li><strong>OpenStreetMap</strong> — Fond de carte</li>
-            </ul>
-            <p style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);font-size:0.8rem;color:var(--text-mention);">
-                <i class="fas fa-circle-info"></i>
-                Les aéronefs militaires peuvent ne pas être visibles s'ils volent transpondeur éteint.
-            </p>
-        </div>
-    </div>
-
 </main>
 
 <footer class="fr-footer">
     <div class="fr-container">
-        <div class="fr-footer__top">
-            <div class="fr-footer__brand">
-                <div class="fr-header__brand-logo" style="width:32px;height:32px;font-size:1rem;">📡</div>
-                <div>
-                    <div>Radar Aérien France</div>
-                    <div style="font-size:0.75rem;font-weight:400;color:var(--text-mention);">
-                        Outil tiers indépendant — non gouvernemental
-                    </div>
-                </div>
+        <div class="fr-footer__brand">
+            <div class="fr-header__brand-logo" style="width:32px;height:32px;font-size:1rem;">📡</div>
+            <div>
+                <div>Radar Aérien France</div>
+                <div style="font-size:0.75rem;font-weight:400;color:var(--text-mention);">Outil tiers indépendant — non gouvernemental</div>
             </div>
-            <ul class="fr-footer__links">
-                <li><a href="#sourcesAnchor">Sources</a></li>
-                <li><a href="#disclaimer">Mentions légales</a></li>
-            </ul>
         </div>
-        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;">
-            <span>Frontend : GitHub Pages · Backend : Render · Données : ADS-B · USGS · GDELT</span>
-            <span>© 2026 — MIT</span>
-        </div>
+        <div>Hébergement : GitHub Pages · Données : ADS-B communautaire · USGS · GDELT · © 2026 MIT</div>
     </div>
 </footer>
 
@@ -609,17 +510,21 @@ main { padding: 1.5rem 0 3rem; }
 <script>
 'use strict';
 
-const BACKEND_URL = window.RADAR_CONFIG?.BACKEND_URL || 'http://localhost:3000';
+// ============================================================
+// Proxy CORS — toutes les requêtes passent par ici
+// ============================================================
+const PROXY = 'https://api.cors.lol/?url=';
+const proxied = (url) => PROXY + encodeURIComponent(url);
 
 const state = {
     charts: { alt: null, speed: null, quakes: null },
     data: { flights: [], military: [], quakes: [], news: [] },
     tableRows: [],
     sortDir: {},
-    socket: null,
     map: null,
     drawnItems: null,
     geoFilter: { active: false, bounds: null },
+    updateInterval: null,
     radar: {
         canvas: null, ctx: null, animationId: null,
         sweepAngle: 0, paused: false,
@@ -630,94 +535,15 @@ const state = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('[init] Backend URL :', BACKEND_URL);
     initRadar();
     initMap();
-    initIndexedDB();
-    initWebSocket();
+    refreshAll();
+    state.updateInterval = setInterval(refreshAll, 30000);
 });
 
-/* ============================================================
-   WEBSOCKET — Connexion au backend distant
-   ============================================================ */
-function initWebSocket() {
-    if (typeof io === 'undefined') {
-        console.error('[WS] Socket.IO client non chargé — vérifiez le CDN');
-        setStatus('error', 'Socket.IO indisponible');
-        return;
-    }
-
-    console.log('[WS] Connexion à', BACKEND_URL);
-
-    state.socket = io(BACKEND_URL, {
-        reconnection: true,
-        reconnectionDelay: 2000,
-        reconnectionDelayMax: 10000,
-        reconnectionAttempts: Infinity,
-        timeout: 10000,
-        transports: ['websocket', 'polling']
-    });
-
-    state.socket.on('connect', () => {
-        console.log('[WS] ✅ Connecté :', state.socket.id);
-        setStatus('ok', 'Temps réel actif');
-    });
-
-    state.socket.on('disconnect', (reason) => {
-        console.warn('[WS] ❌ Déconnecté :', reason);
-        setStatus('error', 'Reconnexion…');
-    });
-
-    state.socket.on('connect_error', (err) => {
-        console.error('[WS] Erreur connexion :', err.message);
-        setStatus('error', 'Backend injoignable');
-    });
-
-    state.socket.on('data-update', (data) => {
-        console.log('[WS] 📡 Données reçues :', {
-            civils: data.flights?.length || 0,
-            militaires: data.military?.length || 0,
-            séismes: data.quakes?.length || 0
-        });
-
-        data.quakes = (data.quakes || []).map(q => ({ ...q, time: new Date(q.time) }));
-        state.data = data;
-
-        updateKPIs();
-        updateCharts();
-        updateTable();
-        updateMapMarkers();
-        savePositions([...data.flights, ...data.military]);
-
-        document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('fr-FR');
-        document.getElementById('radarLastUpdate').textContent = 'MAJ : ' + new Date().toLocaleTimeString('fr-FR');
-        document.getElementById('radarTargetCount').textContent =
-            (data.flights?.length || 0) + (data.military?.length || 0);
-
-        const ok = [data.flights?.length > 0, data.military?.length > 0,
-                    data.quakes?.length > 0, data.news?.length > 0].filter(Boolean).length;
-        document.getElementById('apiStatus').innerHTML =
-            `<i class="fas fa-satellite-dish"></i> Sources : <strong>${ok}/4 actives</strong>`;
-    });
-}
-
-function setStatus(type, text) {
-    const dot = document.getElementById('statusDot');
-    const txt = document.getElementById('statusText');
-    dot.classList.remove('fr-badge-dot--off', 'fr-badge-dot--wait');
-    if (type === 'ok') {
-        // rien à ajouter, point vert par défaut
-    } else if (type === 'error') {
-        dot.classList.add('fr-badge-dot--off');
-    } else {
-        dot.classList.add('fr-badge-dot--wait');
-    }
-    txt.textContent = text;
-}
-
-/* ============================================================
-   RADAR
-   ============================================================ */
+// ============================================================
+// RADAR
+// ============================================================
 function initRadar() {
     const canvas = document.getElementById('radarCanvas');
     if (!canvas) return;
@@ -795,7 +621,7 @@ function animateRadar() {
     ctx.lineTo(cx + Math.cos(state.radar.sweepAngle) * maxR, cy + Math.sin(state.radar.sweepAngle) * maxR);
     ctx.stroke();
 
-    const allFlights = [...(state.data.flights || []), ...(state.data.military || [])];
+    const allFlights = [...state.data.flights, ...state.data.military];
     const rangeDeg = state.radar.rangeNM / 60;
 
     allFlights.forEach(f => {
@@ -841,7 +667,6 @@ function toggleRadarPause() {
     btn.querySelector('i').className = state.radar.paused ? 'fas fa-play' : 'fas fa-pause';
     document.getElementById('radarSweepStatus').textContent = state.radar.paused ? 'PAUSE' : 'ACTIF';
 }
-
 function cycleRadarRange() {
     state.radar.rangeIndex = (state.radar.rangeIndex + 1) % state.radar.rangeOptions.length;
     state.radar.rangeNM = state.radar.rangeOptions[state.radar.rangeIndex];
@@ -849,9 +674,9 @@ function cycleRadarRange() {
 }
 function toggleRadarLabels() { state.radar.showLabels = !state.radar.showLabels; }
 
-/* ============================================================
-   MAP
-   ============================================================ */
+// ============================================================
+// MAP
+// ============================================================
 function initMap() {
     state.map = L.map('map').setView([46.6, 2.5], 5);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -904,7 +729,7 @@ function toggleGeoFilter() {
 
 function applyGeoFilter() {
     const bounds = state.geoFilter.bounds;
-    const allAir = [...(state.data.military || []), ...(state.data.flights || [])];
+    const allAir = [...state.data.military, ...state.data.flights];
     const filtered = bounds
         ? allAir.filter(f => f.lat != null && bounds.contains([f.lat, f.lon]))
         : allAir;
@@ -920,9 +745,131 @@ function applyGeoFilter() {
         (bounds ? ' (zone filtrée)' : '');
 }
 
-/* ============================================================
-   KPIs
-   ============================================================ */
+// ============================================================
+// FETCH — Toutes les APIs via cors.lol
+// ============================================================
+async function fetchJSON(url) {
+    const r = await fetch(proxied(url));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const text = await r.text();
+    if (!text.trim().startsWith('{')) throw new Error('Non-JSON');
+    return JSON.parse(text);
+}
+
+async function fetchFlights() {
+    const targets = [
+        'https://api.adsb.lol/v2/point/48.85/2.35/250',
+        'https://opendata.adsb.fi/api/v2/point/48.85/2.35/250'
+    ];
+    for (const url of targets) {
+        try {
+            const j = await fetchJSON(url);
+            if (!j.ac) throw new Error('Format');
+            console.log('[flights] ✓ ' + new URL(url).hostname + ' (' + j.ac.length + ')');
+            return j.ac.map(a => ({
+                icao24: a.hex,
+                callsign: (a.flight || a.hex || '').trim() || '—',
+                lon: a.lon, lat: a.lat,
+                alt: typeof a.alt_baro === 'number' ? Math.round(a.alt_baro * 0.3048) : null,
+                vel: typeof a.gs === 'number' ? Math.round(a.gs * 0.514444) : null,
+                country: a.t || a.r || '—',
+                military: false
+            })).filter(f => f.lat != null && f.lon != null);
+        } catch (e) { console.warn('[flights] ✗', new URL(url).hostname, e.message); }
+    }
+    return [];
+}
+
+async function fetchMilitaryFlights() {
+    const targets = [
+        'https://api.adsb.lol/v2/mil',
+        'https://opendata.adsb.fi/api/v2/mil'
+    ];
+    for (const url of targets) {
+        try {
+            const j = await fetchJSON(url);
+            if (!j.ac) throw new Error('Format');
+            console.log('[mil] ✓ ' + new URL(url).hostname + ' (' + j.ac.length + ')');
+            return j.ac.map(a => ({
+                icao24: a.hex,
+                callsign: (a.flight || a.hex || '').trim() || '—',
+                lon: a.lon, lat: a.lat,
+                alt: typeof a.alt_baro === 'number' ? Math.round(a.alt_baro * 0.3048) : null,
+                vel: typeof a.gs === 'number' ? Math.round(a.gs * 0.514444) : null,
+                country: a.t || a.r || '—',
+                military: true
+            })).filter(f => f.lat != null && f.lon != null);
+        } catch (e) { console.warn('[mil] ✗', new URL(url).hostname, e.message); }
+    }
+    return [];
+}
+
+async function fetchEarthquakes() {
+    try {
+        const r = await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        console.log('[USGS] ✓ ' + j.features.length);
+        return (j.features || []).map(f => ({
+            id: f.id, time: new Date(f.properties.time),
+            mag: f.properties.mag, place: f.properties.place,
+            lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0],
+            url: f.properties.url
+        })).sort((a, b) => b.time - a.time);
+    } catch (e) { console.warn('[USGS] ✗', e.message); return []; }
+}
+
+async function fetchNews() {
+    try {
+        const j = await fetchJSON('https://api.gdeltproject.org/api/v2/doc/doc?query=aviation&mode=artlist&maxrecords=50&format=json&timespan=1d');
+        console.log('[GDELT] ✓ ' + (j.articles?.length || 0));
+        return (j.articles || []).map((a, i) => ({
+            id: 'n' + i, title: a.title, url: a.url,
+            source: a.domain || 'GDELT', country: a.sourcecountry || '—', seen: a.seendate
+        }));
+    } catch (e) { console.warn('[GDELT] ✗', e.message); return []; }
+}
+
+// ============================================================
+// REFRESH
+// ============================================================
+async function refreshAll() {
+    setStatus('wait', 'Mise à jour…');
+    const [flights, military, quakes, news] = await Promise.all([
+        fetchFlights(), fetchMilitaryFlights(), fetchEarthquakes(), fetchNews()
+    ]);
+
+    state.data = { flights, military, quakes, news };
+
+    updateKPIs();
+    updateCharts();
+    updateTable();
+    updateMapMarkers();
+
+    const ok = [flights.length > 0, military.length > 0, quakes.length > 0, news.length > 0].filter(Boolean).length;
+    document.getElementById('apiStatus').innerHTML = `<i class="fas fa-satellite-dish"></i> Sources : <strong>${ok}/4 actives</strong>`;
+
+    if (ok === 0) setStatus('error', 'Hors ligne');
+    else if (ok < 4) setStatus('wait', 'Connexion partielle');
+    else setStatus('ok', 'Temps réel actif');
+
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('fr-FR');
+    document.getElementById('radarLastUpdate').textContent = 'MAJ : ' + new Date().toLocaleTimeString('fr-FR');
+    document.getElementById('radarTargetCount').textContent = flights.length + military.length;
+}
+
+function setStatus(type, text) {
+    const dot = document.getElementById('statusDot');
+    const txt = document.getElementById('statusText');
+    dot.classList.remove('fr-badge-dot--off', 'fr-badge-dot--wait');
+    if (type === 'error') dot.classList.add('fr-badge-dot--off');
+    else if (type === 'wait') dot.classList.add('fr-badge-dot--wait');
+    txt.textContent = text;
+}
+
+// ============================================================
+// KPIs
+// ============================================================
 function updateKPIs() {
     const { flights, military, quakes } = state.data;
     document.getElementById('kpiFlights').textContent = flights.length;
@@ -933,7 +880,6 @@ function updateKPIs() {
     const withAlt = allAir.filter(f => f.alt != null);
     const maxAlt = withAlt.length ? Math.max(...withAlt.map(f => f.alt)) : 0;
     document.getElementById('kpiAltMax').textContent = maxAlt ? maxAlt.toLocaleString('fr-FR') + ' m' : '—';
-    document.getElementById('kpiAltMaxTrend').textContent = maxAlt > 10000 ? 'Haute altitude' : 'Normale';
 
     document.getElementById('kpiQuakes').textContent = quakes.length;
     const strong = quakes.filter(q => q.mag >= 4.5).length;
@@ -948,13 +894,12 @@ function updateKPIs() {
         const avgVel = Math.round(withVel.reduce((s, f) => s + f.vel, 0) / withVel.length);
         document.getElementById('radarAvgSpeed').textContent = avgVel.toLocaleString('fr-FR');
     }
-    const approaching = allAir.filter(f => f.alt != null && f.alt < 3000 && f.vel != null && f.vel < 400).length;
-    document.getElementById('radarApproach').textContent = approaching;
+    document.getElementById('radarApproach').textContent = allAir.filter(f => f.alt != null && f.alt < 3000 && f.vel != null && f.vel < 400).length;
 }
 
-/* ============================================================
-   CHARTS
-   ============================================================ */
+// ============================================================
+// CHARTS
+// ============================================================
 function updateCharts() {
     const allAir = [...state.data.flights, ...state.data.military];
 
@@ -1020,9 +965,9 @@ function chartOpts() {
     };
 }
 
-/* ============================================================
-   TABLE
-   ============================================================ */
+// ============================================================
+// TABLE
+// ============================================================
 function updateTable() {
     if (state.geoFilter.active) return applyGeoFilter();
     const allAir = [...state.data.military, ...state.data.flights];
@@ -1037,7 +982,7 @@ function updateTable() {
 function renderTable(rows) {
     const tbody = document.getElementById('eventsBody');
     if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:1.5rem;">Aucun aéronef</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:1.5rem;">Aucun aéronef détecté</td></tr>';
         document.getElementById('tableCount').textContent = '0 contact';
         return;
     }
@@ -1073,14 +1018,13 @@ function sortTable(col) {
     renderTable(sorted);
 }
 
-/* ============================================================
-   MAP MARKERS
-   ============================================================ */
+// ============================================================
+// MAP MARKERS
+// ============================================================
 function updateMapMarkers() {
     if (!state.map) return;
     if (state._markers) state._markers.forEach(m => state.map.removeLayer(m));
     state._markers = [];
-
     [...state.data.military, ...state.data.flights].slice(0, 200).forEach(f => {
         if (f.lat == null) return;
         const color = f.military ? '#FF00FF' : '#000091';
@@ -1092,37 +1036,9 @@ function updateMapMarkers() {
     });
 }
 
-/* ============================================================
-   INDEXEDDB
-   ============================================================ */
-let db = null;
-function initIndexedDB() {
-    const req = indexedDB.open('RadarDB', 1);
-    req.onupgradeneeded = (e) => {
-        const d = e.target.result;
-        if (!d.objectStoreNames.contains('positions')) {
-            const s = d.createObjectStore('positions', { keyPath: 'id', autoIncrement: true });
-            s.createIndex('icao24', 'icao24');
-            s.createIndex('timestamp', 'timestamp');
-        }
-    };
-    req.onsuccess = (e) => { db = e.target.result; };
-}
-
-function savePositions(flights) {
-    if (!db) return;
-    const tx = db.transaction('positions', 'readwrite');
-    const store = tx.objectStore('positions');
-    const now = Date.now();
-    flights.forEach(f => {
-        if (!f.icao24 || f.lat == null) return;
-        store.add({ icao24: f.icao24, callsign: f.callsign, lat: f.lat, lon: f.lon, alt: f.alt, timestamp: now });
-    });
-}
-
-/* ============================================================
-   EXPORT CSV
-   ============================================================ */
+// ============================================================
+// EXPORT CSV
+// ============================================================
 function exportCSV() {
     const allAir = [...state.data.military, ...state.data.flights];
     const headers = ['Type', 'Indicatif', 'Pays', 'Latitude', 'Longitude', 'Altitude (m)', 'Vitesse (km/h)'];
@@ -1155,9 +1071,9 @@ function exportCSV() {
     URL.revokeObjectURL(url);
 }
 
-/* ============================================================
-   EXPORT PDF
-   ============================================================ */
+// ============================================================
+// EXPORT PDF
+// ============================================================
 function exportPDF() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -1181,7 +1097,6 @@ function exportPDF() {
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     doc.text('RÉSUMÉ', 14, 43);
-
     const summary = [
         ['Aéronefs civils', state.data.flights.length],
         ['Aéronefs militaires', state.data.military.length],
@@ -1204,7 +1119,6 @@ function exportPDF() {
         doc.setFont('helvetica', 'bold');
         doc.text('AÉRONEFS DÉTECTÉS (extrait)', 14, y);
         y += 4;
-
         doc.autoTable({
             startY: y,
             head: [['Indicatif', 'Type', 'Pays', 'Altitude', 'Vitesse']],
@@ -1227,13 +1141,12 @@ function exportPDF() {
         doc.setTextColor(120, 120, 120);
         doc.text('Page ' + i + '/' + pages + ' — Outil tiers non gouvernemental', 14, 290);
     }
-
     doc.save(`radar_rapport_${now.toISOString().slice(0, 19).replace(/[:T]/g, '-')}.pdf`);
 }
 
-/* ============================================================
-   MODAL
-   ============================================================ */
+// ============================================================
+// MODAL
+// ============================================================
 function showDetail(index) {
     const r = state.tableRows[index];
     if (!r) return;
@@ -1250,14 +1163,14 @@ function showDetail(index) {
 function closeModal() { document.getElementById('detailModal').classList.remove('active'); }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 
-/* ============================================================
-   NAV
-   ============================================================ */
+// ============================================================
+// NAV
+// ============================================================
 document.querySelectorAll('.fr-nav__link').forEach(btn => {
     btn.addEventListener('click', () => {
         document.querySelectorAll('.fr-nav__link').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        const targets = { overview: null, radar: 'radarAnchor', map: 'mapAnchor', sources: 'sourcesAnchor' };
+        const targets = { overview: null, radar: 'radarAnchor', map: 'mapAnchor' };
         const id = targets[btn.dataset.tab];
         if (id) {
             const el = document.getElementById(id);
@@ -1266,21 +1179,21 @@ document.querySelectorAll('.fr-nav__link').forEach(btn => {
     });
 });
 
-/* ============================================================
-   UTILS
-   ============================================================ */
+// ============================================================
+// UTILS
+// ============================================================
 function escapeHtml(s) {
     return String(s == null ? '' : s)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 function showAbout() {
-    alert("Radar Aérien France\n\nOutil tiers indépendant, non gouvernemental.\nBackend : " + BACKEND_URL);
+    alert("Radar Aérien France\n\nOutil tiers indépendant, non gouvernemental.\nHébergement : GitHub Pages\nDonnées : ADS-B communautaire · USGS · GDELT");
 }
 
 window.addEventListener('beforeunload', () => {
     if (state.radar.animationId) cancelAnimationFrame(state.radar.animationId);
-    if (state.socket) state.socket.disconnect();
+    if (state.updateInterval) clearInterval(state.updateInterval);
 });
 </script>
 </body>
