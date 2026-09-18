@@ -366,14 +366,14 @@ main { padding: 1.5rem 0 3rem; }
 
     <div class="fr-kpi-grid">
         <div class="fr-kpi fr-kpi--success">
-            <div class="fr-kpi__label"><i class="fas fa-plane"></i> Aéronefs civils</div>
+            <div class="fr-kpi__label"><i class="fas fa-plane"></i> Aéronefs détectés</div>
             <div class="fr-kpi__value" id="kpiFlights">—</div>
-            <span class="fr-kpi__trend">Rayon 250 NM Paris</span>
+            <span class="fr-kpi__trend">Boîte englobante France</span>
         </div>
         <div class="fr-kpi fr-kpi--warning">
-            <div class="fr-kpi__label"><i class="fas fa-fighter-jet"></i> Militaires</div>
+            <div class="fr-kpi__label"><i class="fas fa-fighter-jet"></i> Militaires probables</div>
             <div class="fr-kpi__value" id="kpiMil">—</div>
-            <span class="fr-kpi__trend" id="kpiMilTrend">Monde</span>
+            <span class="fr-kpi__trend" id="kpiMilTrend">Détection par type</span>
         </div>
         <div class="fr-kpi">
             <div class="fr-kpi__label"><i class="fas fa-arrow-up"></i> Altitude max</div>
@@ -423,7 +423,7 @@ main { padding: 1.5rem 0 3rem; }
             </div>
         </div>
         <div class="fr-card__footer">
-            <span><i class="fas fa-tower-broadcast"></i> Réseau ADS-B communautaire</span>
+            <span><i class="fas fa-tower-broadcast"></i> Source : PocketWorld (agrégateur ADS-B)</span>
             <span id="radarLastUpdate">—</span>
         </div>
     </div>
@@ -465,10 +465,10 @@ main { padding: 1.5rem 0 3rem; }
                     <thead>
                         <tr>
                             <th onclick="sortTable(0)">Indicatif ↕</th>
-                            <th onclick="sortTable(1)">Pays ↕</th>
+                            <th onclick="sortTable(1)">Type ↕</th>
                             <th onclick="sortTable(2)">Altitude ↕</th>
                             <th onclick="sortTable(3)">Vitesse ↕</th>
-                            <th onclick="sortTable(4)">Type ↕</th>
+                            <th onclick="sortTable(4)">Catégorie ↕</th>
                         </tr>
                     </thead>
                     <tbody id="eventsBody">
@@ -494,7 +494,7 @@ main { padding: 1.5rem 0 3rem; }
                 <div style="font-size:0.75rem;font-weight:400;color:var(--text-mention);">Outil tiers indépendant — non gouvernemental</div>
             </div>
         </div>
-        <div>Hébergement : GitHub Pages · Données : ADS-B communautaire · USGS · GDELT · © 2026 MIT</div>
+        <div>Hébergement : GitHub Pages · Données : PocketWorld (OpenSky + adsb.fi + adsb.lol) · USGS · © 2026 MIT</div>
     </div>
 </footer>
 
@@ -512,65 +512,16 @@ main { padding: 1.5rem 0 3rem; }
 'use strict';
 
 /* ============================================================
-   CASCADE DE PROXYS CORS — Fallback automatique
-   Le premier qui répond gagne, les autres servent de secours.
+   CONFIGURATION
+   PocketWorld expose des endpoints avec CORS ouvert nativement.
+   Aucune clé, aucune inscription, aucun proxy nécessaire.
    ============================================================ */
-const CORS_PROXIES = [
-    // 1. codetabs — le plus fiable actuellement
-    (url) => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
-    // 2. corsproxy.io — connu et stable
-    (url) => 'https://corsproxy.io/?url=' + encodeURIComponent(url),
-    // 3. allorigins
-    (url) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
-    // 4. thingproxy
-    (url) => 'https://thingproxy.freeboard.io/fetch/' + url,
-    // 5. cors.lol — en dernier (souvent rate-limité)
-    (url) => 'https://api.cors.lol/?url=' + encodeURIComponent(url)
-];
-
-/**
- * Fetch avec cascade : essaie chaque proxy jusqu'à succès.
- */
-async function fetchJSON(targetUrl) {
-    let lastError = null;
-
-    for (let i = 0; i < CORS_PROXIES.length; i++) {
-        const proxyUrl = CORS_PROXIES[i](targetUrl);
-        let proxyName = 'inconnu';
-        try { proxyName = new URL(proxyUrl).hostname; } catch (e) {}
-
-        try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 8000);
-
-            const r = await fetch(proxyUrl, { signal: controller.signal });
-            clearTimeout(timeout);
-
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-
-            const text = await r.text();
-            const trimmed = text.trim();
-            if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
-                throw new Error('Réponse non-JSON');
-            }
-
-            const data = JSON.parse(trimmed);
-            console.log(`[proxy] ✓ ${proxyName} → ${targetUrl.slice(0, 55)}…`);
-            return data;
-
-        } catch (e) {
-            lastError = e;
-            console.warn(`[proxy] ✗ ${proxyName} → ${e.message}`);
-        }
-    }
-
-    console.error(`[proxy] ✗ Tous les proxys ont échoué pour ${targetUrl.slice(0, 60)}…`);
-    throw lastError || new Error('Aucun proxy disponible');
-}
+const POCKETWORLD = 'https://pocketworld.org/api';
+const BBOX_FRANCE = '-5,42,9,51'; // west,south,east,north
 
 const state = {
     charts: { alt: null, speed: null, quakes: null },
-    data: { flights: [], military: [], quakes: [], news: [] },
+    data: { flights: [], military: [], quakes: [] },
     tableRows: [],
     sortDir: {},
     map: null,
@@ -585,6 +536,30 @@ const state = {
         center: { lat: 48.85, lon: 2.35 }
     }
 };
+
+/* ============================================================
+   DÉTECTION MILITAIRE — par type d'aéronef
+   ============================================================ */
+const MILITARY_TYPECODES = new Set([
+    'C17', 'C5M', 'C130', 'C30J', 'KC135', 'K35R', 'KC10', 'KC46',
+    'P8', 'P3', 'E3TF', 'E3CF', 'E8', 'RC135', 'U2', 'RQ4', 'MQ9',
+    'A400', 'C160', 'C27J', 'C295', 'CN35',
+    'F16', 'F15', 'F18', 'F22', 'F35', 'EF2000', 'RFAL', 'MIRA',
+    'MIG29', 'SU27', 'SU30', 'SU34', 'SU35', 'T50',
+    'B52', 'B1', 'B2',
+    'V22', 'CH47', 'UH60', 'AH64', 'NH90', 'EH10'
+]);
+const MILITARY_REG_PREFIXES = ['FA', 'FB', 'FC', 'FD', 'FE', 'FF', 'FG', 'FH', 'FI', 'FJ', 'FK', 'FL', 'FM', 'FN', 'FO', 'FP', 'FQ', 'FR', 'FS', 'FT', 'FU', 'FV', 'FW', 'FX', 'FY', 'FZ'];
+
+function isMilitary(aircraft) {
+    const tc = (aircraft.typecode || '').toUpperCase();
+    if (MILITARY_TYPECODES.has(tc)) return true;
+    const reg = (aircraft.registration || '').toUpperCase();
+    if (reg && MILITARY_REG_PREFIXES.some(p => reg.startsWith(p)) && reg.length <= 7) return true;
+    const cat = (aircraft.category || '').toLowerCase();
+    if (cat.includes('military') || cat.includes('mil')) return true;
+    return false;
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     initRadar();
@@ -787,9 +762,10 @@ function applyGeoFilter() {
         : allAir;
 
     state.tableRows = filtered.map(f => ({
-        callsign: f.callsign || '—', country: f.country || '—',
+        callsign: f.callsign || '—', typecode: f.typecode || '—',
         alt: f.alt, vel: f.vel, lat: f.lat, lon: f.lon,
-        military: !!f.military, raw: f
+        category: f.category || f.transport_kind || '—',
+        military: !!f.military
     }));
     renderTable(state.tableRows);
     document.getElementById('tableCount').textContent =
@@ -798,64 +774,44 @@ function applyGeoFilter() {
 }
 
 /* ============================================================
-   FETCH — via cascade de proxys
+   FETCH — PocketWorld (CORS ouvert, pas de proxy)
    ============================================================ */
 async function fetchFlights() {
-    const targets = [
-        'https://api.adsb.lol/v2/point/48.85/2.35/250',
-        'https://opendata.adsb.fi/api/v2/point/48.85/2.35/250',
-        'https://api.airplanes.live/v2/point/48.85/2.35/250'
-    ];
-    for (const url of targets) {
-        try {
-            const j = await fetchJSON(url);
-            if (!j.ac || !Array.isArray(j.ac)) throw new Error('Format inattendu');
-            console.log('[flights] ✓ ' + new URL(url).hostname + ' (' + j.ac.length + ')');
-            return j.ac.map(a => ({
-                icao24: a.hex,
-                callsign: (a.flight || a.hex || '').trim() || '—',
-                lon: a.lon, lat: a.lat,
-                alt: typeof a.alt_baro === 'number' ? Math.round(a.alt_baro * 0.3048) : null,
-                vel: typeof a.gs === 'number' ? Math.round(a.gs * 0.514444) : null,
-                country: a.t || a.r || '—',
-                military: false
-            })).filter(f => f.lat != null && f.lon != null);
-        } catch (e) {
-            console.warn('[flights] ✗ ' + new URL(url).hostname + ' → ' + e.message);
-        }
-    }
-    return [];
-}
+    try {
+        const url = `${POCKETWORLD}/flights?wire=1&bbox=${BBOX_FRANCE}`;
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        const fields = j.flight_fields || [];
+        const rows = j.flight_rows || [];
+        console.log('[flights] ✓ ' + rows.length + ' aéronefs (' + (j.total || 0) + ' total)');
 
-async function fetchMilitaryFlights() {
-    const targets = [
-        'https://api.adsb.lol/v2/mil',
-        'https://opendata.adsb.fi/api/v2/mil'
-    ];
-    for (const url of targets) {
-        try {
-            const j = await fetchJSON(url);
-            if (!j.ac || !Array.isArray(j.ac)) throw new Error('Format inattendu');
-            console.log('[mil] ✓ ' + new URL(url).hostname + ' (' + j.ac.length + ')');
-            return j.ac.map(a => ({
-                icao24: a.hex,
-                callsign: (a.flight || a.hex || '').trim() || '—',
-                lon: a.lon, lat: a.lat,
-                alt: typeof a.alt_baro === 'number' ? Math.round(a.alt_baro * 0.3048) : null,
-                vel: typeof a.gs === 'number' ? Math.round(a.gs * 0.514444) : null,
-                country: a.t || a.r || '—',
-                military: true
-            })).filter(f => f.lat != null && f.lon != null);
-        } catch (e) {
-            console.warn('[mil] ✗ ' + new URL(url).hostname + ' → ' + e.message);
-        }
+        return rows.map(row => {
+            const a = {};
+            fields.forEach((f, i) => a[f] = row[i]);
+            return {
+                icao24: a.icao24,
+                callsign: (a.callsign || a.icao24 || '').trim() || '—',
+                lat: a.lat, lon: a.lng,
+                alt: typeof a.alt === 'number' ? Math.round(a.alt) : null,
+                vel: typeof a.velocity === 'number' ? Math.round(a.velocity * 1.852) : null,
+                country: a.country || '—',
+                typecode: a.typecode || '—',
+                registration: a.registration || '',
+                category: a.category || '—',
+                transportKind: a.transport_kind || '—',
+                model: a.model || '',
+                military: false
+            };
+        }).filter(f => f.lat != null && f.lon != null);
+    } catch (e) {
+        console.warn('[flights] ✗ ' + e.message);
+        return [];
     }
-    return [];
 }
 
 async function fetchEarthquakes() {
     try {
-        // USGS supporte CORS nativement — pas de proxy nécessaire
         const r = await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson');
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const j = await r.json();
@@ -872,48 +828,38 @@ async function fetchEarthquakes() {
     }
 }
 
-async function fetchNews() {
-    try {
-        const url = 'https://api.gdeltproject.org/api/v2/doc/doc?query=aviation&mode=artlist&maxrecords=50&format=json&timespan=1d';
-        const j = await fetchJSON(url);
-        console.log('[GDELT] ✓ ' + (j.articles?.length || 0));
-        return (j.articles || []).map((a, i) => ({
-            id: 'n' + i, title: a.title, url: a.url,
-            source: a.domain || 'GDELT', country: a.sourcecountry || '—', seen: a.seendate
-        }));
-    } catch (e) {
-        console.warn('[GDELT] ✗ ' + e.message);
-        return [];
-    }
-}
-
 /* ============================================================
    REFRESH
    ============================================================ */
 async function refreshAll() {
     setStatus('wait', 'Mise à jour…');
 
-    const [flights, military, quakes, news] = await Promise.all([
-        fetchFlights(), fetchMilitaryFlights(), fetchEarthquakes(), fetchNews()
+    const [flights, quakes] = await Promise.all([
+        fetchFlights(), fetchEarthquakes()
     ]);
 
-    state.data = { flights, military, quakes, news };
+    // Séparation civil / militaire
+    const military = flights.filter(f => { f.military = isMilitary(f); return f.military; });
+    const civil = flights.filter(f => !f.military);
+
+    state.data = { flights: civil, military, quakes };
 
     updateKPIs();
     updateCharts();
     updateTable();
     updateMapMarkers();
 
-    const ok = [flights.length > 0, military.length > 0, quakes.length > 0, news.length > 0].filter(Boolean).length;
-    document.getElementById('apiStatus').innerHTML = `<i class="fas fa-satellite-dish"></i> Sources : <strong>${ok}/4 actives</strong>`;
+    const ok = [flights.length > 0, quakes.length > 0].filter(Boolean).length;
+    document.getElementById('apiStatus').innerHTML =
+        `<i class="fas fa-satellite-dish"></i> Sources : <strong>${ok}/2 actives</strong> · ${flights.length} aéronefs`;
 
     if (ok === 0) setStatus('error', 'Hors ligne');
-    else if (ok < 4) setStatus('wait', 'Connexion partielle');
+    else if (ok < 2) setStatus('wait', 'Connexion partielle');
     else setStatus('ok', 'Temps réel actif');
 
     document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('fr-FR');
     document.getElementById('radarLastUpdate').textContent = 'MAJ : ' + new Date().toLocaleTimeString('fr-FR');
-    document.getElementById('radarTargetCount').textContent = flights.length + military.length;
+    document.getElementById('radarTargetCount').textContent = flights.length;
 }
 
 function setStatus(type, text) {
@@ -930,14 +876,15 @@ function setStatus(type, text) {
    ============================================================ */
 function updateKPIs() {
     const { flights, military, quakes } = state.data;
-    document.getElementById('kpiFlights').textContent = flights.length;
+    document.getElementById('kpiFlights').textContent = flights.length + military.length;
     document.getElementById('kpiMil').textContent = military.length;
-    document.getElementById('kpiMilTrend').textContent = military.length > 0 ? 'Actifs' : 'Aucun';
+    document.getElementById('kpiMilTrend').textContent = military.length > 0 ? 'Types détectés' : 'Aucun';
 
     const allAir = [...flights, ...military];
     const withAlt = allAir.filter(f => f.alt != null);
     const maxAlt = withAlt.length ? Math.max(...withAlt.map(f => f.alt)) : 0;
     document.getElementById('kpiAltMax').textContent = maxAlt ? maxAlt.toLocaleString('fr-FR') + ' m' : '—';
+    document.getElementById('kpiAltMaxTrend').textContent = maxAlt > 10000 ? 'Haute altitude' : 'Normale';
 
     document.getElementById('kpiQuakes').textContent = quakes.length;
     const strong = quakes.filter(q => q.mag >= 4.5).length;
@@ -1031,9 +978,10 @@ function updateTable() {
     if (state.geoFilter.active) return applyGeoFilter();
     const allAir = [...state.data.military, ...state.data.flights];
     state.tableRows = allAir.map(f => ({
-        callsign: f.callsign || '—', country: f.country || '—',
+        callsign: f.callsign || '—', typecode: f.typecode || '—',
         alt: f.alt, vel: f.vel, lat: f.lat, lon: f.lon,
-        military: !!f.military, raw: f
+        category: f.category || f.transportKind || '—',
+        military: !!f.military
     }));
     renderTable(state.tableRows);
 }
@@ -1048,10 +996,10 @@ function renderTable(rows) {
     tbody.innerHTML = rows.slice(0, 100).map((r, i) => `
         <tr onclick="showDetail(${i})">
             <td><strong>${escapeHtml(r.callsign)}</strong></td>
-            <td>${escapeHtml(r.country)}</td>
+            <td>${escapeHtml(r.typecode)}</td>
             <td>${r.alt != null ? r.alt.toLocaleString('fr-FR') + ' m' : '—'}</td>
             <td>${r.vel != null ? r.vel.toLocaleString('fr-FR') + ' km/h' : '—'}</td>
-            <td>${r.military ? '<span class="fr-tag fr-tag--mil">MIL</span>' : '<span class="fr-tag fr-tag--info">CIV</span>'}</td>
+            <td>${r.military ? '<span class="fr-tag fr-tag--mil">MIL</span>' : '<span class="fr-tag fr-tag--info">' + escapeHtml(r.category) + '</span>'}</td>
         </tr>
     `).join('');
     document.getElementById('tableCount').textContent = rows.length + ' contact' + (rows.length > 1 ? 's' : '');
@@ -1060,18 +1008,19 @@ function renderTable(rows) {
 function filterTable() {
     const q = document.getElementById('tableSearch').value.trim().toLowerCase();
     if (!q) return renderTable(state.tableRows);
-    renderTable(state.tableRows.filter(r => (r.callsign + ' ' + r.country).toLowerCase().includes(q)));
+    renderTable(state.tableRows.filter(r =>
+        (r.callsign + ' ' + r.typecode + ' ' + r.category).toLowerCase().includes(q)
+    ));
 }
 
 function sortTable(col) {
-    const keys = ['callsign', 'country', 'alt', 'vel', 'military'];
+    const keys = ['callsign', 'typecode', 'alt', 'vel', 'category'];
     const key = keys[col];
     state.sortDir[col] = !state.sortDir[col];
     const dir = state.sortDir[col] ? 1 : -1;
     const sorted = [...state.tableRows].sort((a, b) => {
         const av = a[key], bv = b[key];
         if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
-        if (typeof av === 'boolean' && typeof bv === 'boolean') return (av === bv ? 0 : (av ? -1 : 1)) * dir;
         return String(av).localeCompare(String(bv)) * dir;
     });
     renderTable(sorted);
@@ -1090,7 +1039,7 @@ function updateMapMarkers() {
         const m = L.circleMarker([f.lat, f.lon], {
             radius: 3, color, fillColor: color, fillOpacity: 0.7, weight: 1
         }).addTo(state.map);
-        m.bindPopup(`<strong style="color:${color};">${f.military ? '⚔' : '✈'} ${escapeHtml(f.callsign)}</strong><br>${escapeHtml(f.country)}<br>Alt : ${f.alt != null ? f.alt + ' m' : '—'}`);
+        m.bindPopup(`<strong style="color:${color};">${f.military ? '⚔' : '✈'} ${escapeHtml(f.callsign)}</strong><br>${escapeHtml(f.typecode)}<br>Alt : ${f.alt != null ? f.alt + ' m' : '—'}`);
         state._markers.push(m);
     });
 }
@@ -1100,10 +1049,10 @@ function updateMapMarkers() {
    ============================================================ */
 function exportCSV() {
     const allAir = [...state.data.military, ...state.data.flights];
-    const headers = ['Type', 'Indicatif', 'Pays', 'Latitude', 'Longitude', 'Altitude (m)', 'Vitesse (km/h)'];
+    const headers = ['Type', 'Indicatif', 'Code type', 'Immat.', 'Catégorie', 'Latitude', 'Longitude', 'Altitude (m)', 'Vitesse (km/h)'];
     const rows = allAir.map(f => [
         f.military ? 'MILITAIRE' : 'CIVIL',
-        f.callsign, f.country,
+        f.callsign, f.typecode, f.registration || '', f.category || f.transportKind || '',
         f.lat != null ? f.lat.toFixed(4) : '',
         f.lon != null ? f.lon.toFixed(4) : '',
         f.alt != null ? f.alt : '',
@@ -1180,9 +1129,9 @@ function exportPDF() {
         y += 4;
         doc.autoTable({
             startY: y,
-            head: [['Indicatif', 'Type', 'Pays', 'Altitude', 'Vitesse']],
+            head: [['Indicatif', 'Type', 'Catégorie', 'Altitude', 'Vitesse']],
             body: allAir.slice(0, 25).map(f => [
-                f.callsign, f.military ? 'MIL' : 'CIV', f.country,
+                f.callsign, f.typecode, f.military ? 'MIL' : (f.category || '—'),
                 f.alt != null ? f.alt.toLocaleString('fr-FR') + ' m' : '—',
                 f.vel != null ? f.vel.toLocaleString('fr-FR') + ' km/h' : '—'
             ]),
@@ -1212,10 +1161,12 @@ function showDetail(index) {
     document.getElementById('modalTitle').textContent = (r.military ? '⚔ ' : '✈ ') + r.callsign;
     document.getElementById('modalBody').innerHTML = `
         <p style="margin-bottom:0.75rem;"><strong>Indicatif :</strong> ${escapeHtml(r.callsign)}</p>
-        <p style="margin-bottom:0.75rem;"><strong>Pays :</strong> ${escapeHtml(r.country)}</p>
+        <p style="margin-bottom:0.75rem;"><strong>Code type :</strong> ${escapeHtml(r.typecode)}</p>
+        <p style="margin-bottom:0.75rem;"><strong>Catégorie :</strong> ${escapeHtml(r.category)}</p>
         <p style="margin-bottom:0.75rem;"><strong>Altitude :</strong> ${r.alt != null ? r.alt.toLocaleString('fr-FR') + ' m' : '—'}</p>
         <p style="margin-bottom:0.75rem;"><strong>Vitesse :</strong> ${r.vel != null ? r.vel.toLocaleString('fr-FR') + ' km/h' : '—'}</p>
         <p style="margin-bottom:0.75rem;"><strong>Position :</strong> ${r.lat != null ? r.lat.toFixed(4) + ', ' + r.lon.toFixed(4) : '—'}</p>
+        ${r.military ? '<p style="margin-top:1rem;padding:0.5rem;background:#FFE9FF;border-left:3px solid #B300B3;font-size:0.8rem;"><strong>Détection militaire :</strong> basée sur le code type (OTAN) et/ou le préfixe d\'immatriculation. Cette classification est indicative et peut contenir des faux positifs.</p>' : ''}
     `;
     document.getElementById('detailModal').classList.add('active');
 }
@@ -1247,7 +1198,7 @@ function escapeHtml(s) {
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 function showAbout() {
-    alert("Radar Aérien France\n\nOutil tiers indépendant, non gouvernemental.\nHébergement : GitHub Pages\nDonnées : ADS-B communautaire · USGS · GDELT");
+    alert("Radar Aérien France\n\nOutil tiers indépendant, non gouvernemental.\nHébergement : GitHub Pages\nSource : PocketWorld (agrégateur ADS-B)\nSéismes : USGS\n\nAucune clé API, aucun proxy, aucun backend.");
 }
 
 window.addEventListener('beforeunload', () => {
