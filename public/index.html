@@ -1,0 +1,1291 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radar Aérien France — Surveillance open source</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+<script src="/socket.io/socket.io.js"></script>
+
+<style>
+:root {
+    --blue-france: #000091;
+    --blue-france-hover: #1212FF;
+    --blue-light: #F5F5FE;
+    --blue-mid: #E3E3FD;
+    --red-marianne: #E1000F;
+    --red-light: #FDEFF2;
+    --green: #18753C;
+    --green-light: #B8FEC9;
+    --yellow: #716043;
+    --orange: #B34000;
+    --grey-50: #161616;
+    --grey-200: #3A3A3A;
+    --grey-425: #666666;
+    --grey-925: #E5E5E5;
+    --grey-950: #EEEEEE;
+    --grey-975: #F6F6F6;
+    --white: #FFFFFF;
+    --text: var(--grey-200);
+    --text-title: var(--grey-50);
+    --text-mention: var(--grey-425);
+    --border: var(--grey-925);
+    --radius: 4px;
+    --shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 16px; }
+body {
+    font-family: "Marianne", "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+    background: var(--white); color: var(--text); line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+}
+
+.fr-header { background: var(--white); border-bottom: 1px solid var(--border); }
+.fr-header__top {
+    background: var(--blue-france); color: var(--white);
+    padding: 6px 0; font-size: 0.75rem; text-align: center;
+}
+.fr-header__top a { color: var(--white); text-decoration: underline; }
+.fr-header__main {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 1rem 0; gap: 1rem; flex-wrap: wrap;
+}
+.fr-header__brand { display: flex; align-items: center; gap: 0.75rem; text-decoration: none; color: var(--text-title); }
+.fr-header__brand-logo {
+    width: 44px; height: 44px; background: var(--blue-france); color: var(--white);
+    border-radius: var(--radius); display: flex; align-items: center; justify-content: center;
+    font-size: 1.4rem; font-weight: 700; flex-shrink: 0;
+}
+.fr-header__brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+.fr-header__brand-name { font-weight: 700; font-size: 1.05rem; color: var(--blue-france); }
+.fr-header__brand-tag { font-size: 0.75rem; color: var(--text-mention); }
+.fr-header__tools { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
+.fr-btn {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.5rem 1rem; border-radius: var(--radius);
+    font-family: inherit; font-size: 0.875rem; font-weight: 500;
+    cursor: pointer; border: 1px solid transparent;
+    transition: background 0.15s; text-decoration: none;
+}
+.fr-btn--ghost { background: transparent; border-color: var(--border); color: var(--blue-france); }
+.fr-btn--ghost:hover { background: var(--blue-light); }
+.fr-btn--primary { background: var(--blue-france); color: var(--white); }
+.fr-btn--sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
+.fr-btn--icon { width: 36px; height: 36px; padding: 0; justify-content: center; }
+
+.fr-disclaimer {
+    background: var(--red-light); border-left: 4px solid var(--red-marianne);
+    padding: 0.75rem 1rem; font-size: 0.8rem; color: var(--text);
+    margin: 1rem 0; border-radius: var(--radius);
+    display: flex; gap: 0.75rem; align-items: flex-start;
+}
+.fr-disclaimer i { color: var(--red-marianne); margin-top: 0.15rem; }
+.fr-disclaimer strong { color: var(--red-marianne); }
+
+.fr-nav { border-bottom: 1px solid var(--border); background: var(--white); }
+.fr-nav__list { display: flex; list-style: none; overflow-x: auto; scrollbar-width: none; }
+.fr-nav__list::-webkit-scrollbar { display: none; }
+.fr-nav__link {
+    display: block; padding: 1rem 1rem 0.85rem;
+    color: var(--text); text-decoration: none; font-size: 0.9rem;
+    font-weight: 500; white-space: nowrap;
+    border-bottom: 3px solid transparent;
+    background: none; border-top: none; border-left: none; border-right: none;
+    cursor: pointer; font-family: inherit;
+}
+.fr-nav__link:hover { background: var(--blue-light); }
+.fr-nav__link.active {
+    color: var(--blue-france);
+    border-bottom-color: var(--blue-france);
+    background: var(--blue-light);
+}
+
+.fr-container { max-width: 1400px; margin: 0 auto; padding: 0 1rem; }
+main { padding: 1.5rem 0 3rem; }
+
+.fr-status {
+    display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem;
+    padding: 0.75rem 1rem; background: var(--blue-light);
+    border-radius: var(--radius); font-size: 0.8rem;
+    margin-bottom: 1rem; align-items: center;
+}
+.fr-status__item { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--text-mention); }
+.fr-status__item i { color: var(--blue-france); }
+.fr-status__spacer { flex: 1; }
+.fr-badge-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green); box-shadow: 0 0 0 3px rgba(24,117,60,0.2);
+    animation: pulse 2s infinite;
+}
+.fr-badge-dot--off { background: var(--red-marianne); box-shadow: 0 0 0 3px rgba(225,0,15,0.2); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+.fr-section-title {
+    font-size: 1.25rem; font-weight: 700; color: var(--text-title);
+    margin: 1.75rem 0 0.75rem; display: flex; align-items: center; gap: 0.5rem;
+}
+.fr-section-title i { color: var(--blue-france); }
+.fr-section-sub { font-size: 0.85rem; color: var(--text-mention); margin-bottom: 1rem; }
+
+.fr-kpi-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem; margin-bottom: 1rem;
+}
+.fr-kpi {
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.25rem;
+    border-top: 4px solid var(--blue-france); transition: all 0.15s;
+}
+.fr-kpi:hover { box-shadow: var(--shadow); transform: translateY(-2px); }
+.fr-kpi--danger { border-top-color: var(--red-marianne); }
+.fr-kpi--success { border-top-color: var(--green); }
+.fr-kpi--warning { border-top-color: var(--orange); }
+.fr-kpi__label {
+    font-size: 0.75rem; color: var(--text-mention);
+    text-transform: uppercase; letter-spacing: 0.03em;
+    margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem;
+}
+.fr-kpi__label i { color: var(--blue-france); }
+.fr-kpi--danger .fr-kpi__label i { color: var(--red-marianne); }
+.fr-kpi__value { font-size: 2rem; font-weight: 700; color: var(--text-title); line-height: 1; }
+.fr-kpi__trend {
+    display: inline-block; margin-top: 0.6rem;
+    font-size: 0.75rem; padding: 2px 8px;
+    border-radius: 12px; font-weight: 600;
+}
+.fr-kpi__trend--up { background: var(--green-light); color: var(--green); }
+.fr-kpi__trend--down { background: #FFE9E6; color: var(--red-marianne); }
+.fr-kpi__trend--flat { background: var(--grey-950); color: var(--text-mention); }
+
+.fr-grid-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+.fr-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+@media (max-width: 900px) { .fr-grid-2, .fr-grid-3 { grid-template-columns: 1fr; } }
+
+.fr-card {
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden;
+    display: flex; flex-direction: column;
+}
+.fr-card__header {
+    padding: 0.9rem 1rem; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 0.5rem; background: var(--blue-light); flex-wrap: wrap;
+}
+.fr-card__title {
+    font-size: 0.95rem; font-weight: 700; color: var(--blue-france);
+    display: flex; align-items: center; gap: 0.5rem;
+}
+.fr-card__body { padding: 1rem; flex: 1; }
+.fr-card__footer {
+    padding: 0.6rem 1rem; border-top: 1px solid var(--border);
+    font-size: 0.75rem; color: var(--text-mention);
+    background: var(--grey-975);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;
+}
+
+.fr-radar-container {
+    position: relative; height: 500px; border-radius: var(--radius);
+    overflow: hidden;
+    background: radial-gradient(circle at center, #0a1628 0%, #020617 100%);
+    border: 1px solid var(--blue-france);
+}
+#radarCanvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.radar-overlay-info {
+    position: absolute; top: 12px; left: 12px;
+    background: rgba(0,0,145,0.85); color: #fff;
+    padding: 8px 12px; border-radius: 4px; font-size: 0.75rem;
+    z-index: 10; backdrop-filter: blur(6px); line-height: 1.4;
+}
+.radar-overlay-info strong { color: #64B5F6; }
+.radar-legend {
+    position: absolute; bottom: 12px; right: 12px;
+    background: rgba(0,0,0,0.7); color: #fff;
+    padding: 8px 12px; border-radius: 4px; font-size: 0.7rem;
+    z-index: 10; line-height: 1.6;
+}
+.radar-legend .dot {
+    display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; margin-right: 4px; vertical-align: middle;
+}
+.radar-legend .dot--civil { background: #00d4ff; }
+.radar-legend .dot--high { background: #E1000F; }
+.radar-legend .dot--low { background: #FF9900; }
+.radar-legend .dot--mil { background: #FF00FF; }
+.radar-controls {
+    position: absolute; top: 12px; right: 12px;
+    display: flex; flex-direction: column; gap: 4px; z-index: 10;
+}
+.radar-btn {
+    background: rgba(0,0,145,0.85); border: 1px solid #64B5F6;
+    color: #fff; width: 36px; height: 36px; border-radius: 4px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+}
+.radar-btn:hover { background: #000091; }
+.radar-stats {
+    position: absolute; bottom: 12px; left: 12px;
+    background: rgba(0,0,145,0.85); color: #fff;
+    padding: 8px 12px; border-radius: 4px; font-size: 0.7rem;
+    z-index: 10; line-height: 1.6;
+}
+.radar-stats .val { color: #00ff88; font-weight: 700; }
+.radar-stats .warn { color: #FF9900; font-weight: 700; }
+
+.fr-chart-wrap { position: relative; height: 220px; }
+.fr-chart-wrap canvas { width: 100% !important; height: 100% !important; }
+
+.fr-table-wrap { overflow-x: auto; max-height: 400px; overflow-y: auto; }
+.fr-table { width: 100%; border-collapse: collapse; font-size: 0.825rem; }
+.fr-table thead th {
+    background: var(--blue-light); color: var(--blue-france);
+    text-align: left; padding: 0.65rem 0.85rem;
+    font-weight: 700; font-size: 0.75rem;
+    text-transform: uppercase; letter-spacing: 0.03em;
+    border-bottom: 2px solid var(--blue-france);
+    cursor: pointer; user-select: none; white-space: nowrap;
+    position: sticky; top: 0; z-index: 5;
+}
+.fr-table thead th:hover { background: var(--blue-mid); }
+.fr-table tbody td { padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--border); }
+.fr-table tbody tr:hover { background: var(--blue-light); cursor: pointer; }
+
+.fr-tag {
+    display: inline-block; padding: 2px 7px;
+    font-size: 0.7rem; border-radius: 10px;
+    font-weight: 600; line-height: 1.4;
+}
+.fr-tag--success { background: var(--green-light); color: var(--green); }
+.fr-tag--warning { background: #FFE9C2; color: var(--yellow); }
+.fr-tag--error { background: #FFE9E6; color: var(--red-marianne); }
+.fr-tag--info { background: var(--blue-mid); color: var(--blue-france); }
+.fr-tag--mil { background: #FFE9FF; color: #B300B3; font-weight: 700; }
+
+.fr-search {
+    display: flex; align-items: center; gap: 0.5rem;
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 0.4rem 0.75rem;
+    font-size: 0.85rem;
+}
+.fr-search input {
+    border: none; outline: none; font-family: inherit;
+    font-size: 0.85rem; width: 160px;
+    background: transparent; color: var(--text);
+}
+.fr-search i { color: var(--text-mention); }
+
+.fr-footer {
+    background: var(--white); border-top: 2px solid var(--blue-france);
+    margin-top: 3rem; padding: 1.5rem 0;
+    font-size: 0.8rem; color: var(--text-mention);
+}
+.fr-footer__top {
+    display: flex; justify-content: space-between;
+    align-items: flex-start; gap: 1rem; flex-wrap: wrap;
+    padding-bottom: 1rem; border-bottom: 1px solid var(--border);
+    margin-bottom: 1rem;
+}
+.fr-footer__brand { display: flex; align-items: center; gap: 0.75rem; color: var(--blue-france); font-weight: 700; }
+.fr-footer__links { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; list-style: none; }
+.fr-footer__links a { color: var(--text); text-decoration: none; font-size: 0.8rem; }
+.fr-footer__links a:hover { color: var(--blue-france); text-decoration: underline; }
+
+.fr-spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--blue-mid);
+    border-top-color: var(--blue-france);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    display: inline-block; vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.fr-modal {
+    display: none; position: fixed; inset: 0;
+    background: rgba(22,22,22,0.6);
+    z-index: 3000; align-items: center; justify-content: center;
+    padding: 1rem;
+}
+.fr-modal.active { display: flex; }
+.fr-modal__content {
+    background: var(--white); border-radius: var(--radius);
+    max-width: 560px; width: 100%; max-height: 90vh;
+    overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.fr-modal__header {
+    padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+}
+.fr-modal__title { font-size: 1.1rem; font-weight: 700; color: var(--text-title); }
+.fr-modal__close {
+    background: none; border: none; font-size: 1.4rem;
+    color: var(--text-mention); cursor: pointer; line-height: 1;
+}
+.fr-modal__close:hover { color: var(--red-marianne); }
+.fr-modal__body { padding: 1.25rem; }
+
+@media (max-width: 640px) {
+    .fr-header__main { padding: 0.75rem 0; }
+    .fr-kpi-grid { grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+    .fr-kpi { padding: 0.9rem; }
+    .fr-kpi__value { font-size: 1.5rem; }
+    .fr-radar-container { height: 350px; }
+    .fr-chart-wrap { height: 180px; }
+    .fr-header__tools .fr-btn span { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="fr-header__top">
+    <span>Outil tiers indépendant — </span>
+    <a href="#disclaimer">statut et mentions légales</a>
+</div>
+
+<header class="fr-header">
+    <div class="fr-container">
+        <div class="fr-header__main">
+            <a href="#" class="fr-header__brand">
+                <div class="fr-header__brand-logo">📡</div>
+                <div class="fr-header__brand-text">
+                    <span class="fr-header__brand-name">Radar Aérien France</span>
+                    <span class="fr-header__brand-tag">Veille open source — outil tiers non gouvernemental</span>
+                </div>
+            </a>
+            <div class="fr-header__tools">
+                <button class="fr-btn fr-btn--ghost fr-btn--sm" onclick="exportCSV()">
+                    <i class="fas fa-file-csv"></i> <span>CSV</span>
+                </button>
+                <button class="fr-btn fr-btn--ghost fr-btn--sm" onclick="exportPDF()">
+                    <i class="fas fa-file-pdf"></i> <span>PDF</span>
+                </button>
+                <button class="fr-btn fr-btn--ghost fr-btn--sm fr-btn--icon" onclick="showAbout()" aria-label="À propos">
+                    <i class="fas fa-circle-info"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</header>
+
+<nav class="fr-nav">
+    <div class="fr-container">
+        <ul class="fr-nav__list">
+            <li><button class="fr-nav__link active" data-tab="overview">Vue d'ensemble</button></li>
+            <li><button class="fr-nav__link" data-tab="radar">Radar</button></li>
+            <li><button class="fr-nav__link" data-tab="map">Carte</button></li>
+            <li><button class="fr-nav__link" data-tab="sources">Sources</button></li>
+        </ul>
+    </div>
+</nav>
+
+<main class="fr-container">
+
+    <div class="fr-disclaimer" id="disclaimer">
+        <i class="fas fa-circle-info"></i>
+        <div>
+            <strong>Outil tiers non gouvernemental.</strong>
+            Ce radar n'est ni édité, ni approuvé, ni affilié à l'État français ou à l'Armée de l'Air.
+            Il utilise uniquement des <em>données ADS-B publiques</em> transmises par les aéronefs eux-mêmes,
+            accessibles via des réseaux communautaires ouverts.
+        </div>
+    </div>
+
+    <div class="fr-status">
+        <span class="fr-status__item">
+            <span class="fr-badge-dot" id="statusDot"></span>
+            <span id="statusText">Connexion…</span>
+        </span>
+        <span class="fr-status__item">
+            <i class="fas fa-clock"></i>
+            MAJ : <strong id="lastUpdate">—</strong>
+        </span>
+        <span class="fr-status__item" id="apiStatus">
+            <i class="fas fa-satellite-dish"></i> Sources : <strong>chargement…</strong>
+        </span>
+        <span class="fr-status__spacer"></span>
+        <button class="fr-btn fr-btn--ghost fr-btn--sm" onclick="toggleGeoFilter()">
+            <i class="fas fa-vector-square"></i> Filtre géo : <strong id="geoFilterStatus">Inactif</strong>
+        </button>
+    </div>
+
+    <h2 class="fr-section-title"><i class="fas fa-chart-simple"></i> Vue d'ensemble</h2>
+    <p class="fr-section-sub">Indicateurs clés du trafic aérien et des événements détectés.</p>
+
+    <div class="fr-kpi-grid">
+        <div class="fr-kpi fr-kpi--success">
+            <div class="fr-kpi__label"><i class="fas fa-plane"></i> Aéronefs civils</div>
+            <div class="fr-kpi__value" id="kpiFlights">—</div>
+            <span class="fr-kpi__trend fr-kpi__trend--flat">Rayon 250 NM Paris</span>
+        </div>
+        <div class="fr-kpi fr-kpi--warning">
+            <div class="fr-kpi__label"><i class="fas fa-fighter-jet"></i> Militaires</div>
+            <div class="fr-kpi__value" id="kpiMil">—</div>
+            <span class="fr-kpi__trend fr-kpi__trend--flat" id="kpiMilTrend">Monde</span>
+        </div>
+        <div class="fr-kpi">
+            <div class="fr-kpi__label"><i class="fas fa-arrow-up"></i> Altitude max</div>
+            <div class="fr-kpi__value" id="kpiAltMax">—</div>
+            <span class="fr-kpi__trend fr-kpi__trend--flat" id="kpiAltMaxTrend">—</span>
+        </div>
+        <div class="fr-kpi fr-kpi--danger">
+            <div class="fr-kpi__label"><i class="fas fa-fire"></i> Séismes (24 h)</div>
+            <div class="fr-kpi__value" id="kpiQuakes">—</div>
+            <span class="fr-kpi__trend fr-kpi__trend--flat" id="kpiQuakesTrend">—</span>
+        </div>
+    </div>
+
+    <h2 class="fr-section-title"><i class="fas fa-satellite-dish"></i> Radar temps réel</h2>
+    <p class="fr-section-sub">Balayage radar — 250 NM autour de Paris (ADS-B).</p>
+
+    <div class="fr-card" id="radarAnchor" style="margin-bottom:1rem;">
+        <div class="fr-card__header">
+            <div class="fr-card__title"><i class="fas fa-crosshairs"></i> Radar ADS-B</div>
+            <div style="display:flex;gap:6px;">
+                <button class="fr-btn fr-btn--ghost fr-btn--sm fr-btn--icon" onclick="toggleRadarPause()" id="radarPauseBtn">
+                    <i class="fas fa-pause"></i>
+                </button>
+                <button class="fr-btn fr-btn--ghost fr-btn--sm fr-btn--icon" onclick="cycleRadarRange()">
+                    <i class="fas fa-circle-notch"></i>
+                </button>
+            </div>
+        </div>
+        <div class="fr-card__body" style="padding:0;">
+            <div class="fr-radar-container" id="radarContainer">
+                <canvas id="radarCanvas"></canvas>
+                <div class="radar-overlay-info">
+                    <div><strong>CENTRE :</strong> Paris (48.85°N, 2.35°E)</div>
+                    <div><strong>RAYON :</strong> <span id="radarRangeLabel">250 NM</span></div>
+                    <div><strong>BALAYAGE :</strong> <span id="radarSweepStatus">ACTIF</span></div>
+                    <div><strong>CIBLES :</strong> <span id="radarTargetCount">0</span></div>
+                </div>
+                <div class="radar-controls">
+                    <button class="radar-btn" onclick="toggleRadarLabels()" title="Labels">
+                        <i class="fas fa-tag"></i>
+                    </button>
+                </div>
+                <div class="radar-legend">
+                    <div><span class="dot dot--civil"></span> Civil</div>
+                    <div><span class="dot dot--high"></span> Haute alt.</div>
+                    <div><span class="dot dot--low"></span> Basse alt.</div>
+                    <div><span class="dot dot--mil"></span> Militaire</div>
+                </div>
+                <div class="radar-stats">
+                    <div>Vitesse moy. : <span class="val" id="radarAvgSpeed">—</span> km/h</div>
+                    <div>Alt. moy. : <span class="val" id="radarAvgAlt">—</span> m</div>
+                    <div>En approche : <span class="warn" id="radarApproach">0</span></div>
+                </div>
+            </div>
+        </div>
+        <div class="fr-card__footer">
+            <span><i class="fas fa-tower-broadcast"></i> Réseau ADS-B communautaire</span>
+            <span id="radarLastUpdate">—</span>
+        </div>
+    </div>
+
+    <h2 class="fr-section-title"><i class="fas fa-map-location-dot"></i> Carte interactive</h2>
+    <p class="fr-section-sub">Clic sur "Filtre géo" puis dessinez un rectangle pour filtrer les aéronefs.</p>
+
+    <div class="fr-card" id="mapAnchor" style="margin-bottom:1rem;">
+        <div class="fr-card__body" style="padding:0;">
+            <div id="map" style="height:500px;width:100%;"></div>
+        </div>
+    </div>
+
+    <h2 class="fr-section-title"><i class="fas fa-triangle-exclamation"></i> Conflits NOTAM</h2>
+    <div class="fr-card" style="margin-bottom:1rem;">
+        <div class="fr-card__header">
+            <div class="fr-card__title">Zones d'exclusion détectées</div>
+            <span id="conflictCount" class="fr-tag fr-tag--error">0</span>
+        </div>
+        <div class="fr-card__body" style="padding:0;">
+            <div id="conflictsList" style="max-height:300px;overflow-y:auto;">
+                <div style="padding:1rem;text-align:center;color:var(--text-mention);font-size:0.85rem;">
+                    Aucun conflit détecté
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="fr-grid-3">
+        <div class="fr-card">
+            <div class="fr-card__header"><div class="fr-card__title"><i class="fas fa-chart-bar"></i> Altitudes</div></div>
+            <div class="fr-card__body"><div class="fr-chart-wrap"><canvas id="altChart"></canvas></div></div>
+        </div>
+        <div class="fr-card">
+            <div class="fr-card__header"><div class="fr-card__title"><i class="fas fa-tachometer-alt"></i> Vitesses</div></div>
+            <div class="fr-card__body"><div class="fr-chart-wrap"><canvas id="speedChart"></canvas></div></div>
+        </div>
+        <div class="fr-card">
+            <div class="fr-card__header"><div class="fr-card__title"><i class="fas fa-wave-square"></i> Séismes</div></div>
+            <div class="fr-card__body"><div class="fr-chart-wrap"><canvas id="quakesChart"></canvas></div></div>
+        </div>
+    </div>
+
+    <h2 class="fr-section-title"><i class="fas fa-table"></i> Contacts radar</h2>
+    <div class="fr-card">
+        <div class="fr-card__header">
+            <div class="fr-card__title"><i class="fas fa-list"></i> Aéronefs</div>
+            <div class="fr-search">
+                <i class="fas fa-magnifying-glass"></i>
+                <input type="text" id="tableSearch" placeholder="Rechercher…" oninput="filterTable()">
+            </div>
+        </div>
+        <div class="fr-card__body" style="padding:0;">
+            <div class="fr-table-wrap">
+                <table class="fr-table">
+                    <thead>
+                        <tr>
+                            <th onclick="sortTable(0)">Indicatif ↕</th>
+                            <th onclick="sortTable(1)">Pays ↕</th>
+                            <th onclick="sortTable(2)">Altitude ↕</th>
+                            <th onclick="sortTable(3)">Vitesse ↕</th>
+                            <th onclick="sortTable(4)">Type ↕</th>
+                        </tr>
+                    </thead>
+                    <tbody id="eventsBody">
+                        <tr><td colspan="5" style="text-align:center;padding:1.5rem;">Chargement…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="fr-card__footer">
+            <span id="tableCount">—</span>
+            <span>Données ADS-B publiques</span>
+        </div>
+    </div>
+
+    <h2 class="fr-section-title" id="sourcesAnchor"><i class="fas fa-book"></i> Sources & méthodes</h2>
+    <div class="fr-card">
+        <div class="fr-card__body" style="font-size:0.875rem;line-height:1.7;">
+            <ul style="padding-left:1.25rem;">
+                <li><strong>adsb.lol</strong> — ADS-B civils + flux militaire (<code>/v2/mil</code>)</li>
+                <li><strong>adsb.fi</strong> — Miroir ADS-B européen</li>
+                <li><strong>USGS</strong> — Séismes mondiaux temps réel</li>
+                <li><strong>GDELT</strong> — Actualités mondiales</li>
+                <li><strong>OpenStreetMap</strong> — Fond de carte</li>
+            </ul>
+            <p style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);font-size:0.8rem;color:var(--text-mention);">
+                <i class="fas fa-circle-info"></i>
+                Les aéronefs militaires peuvent ne pas être visibles s'ils volent transpondeur éteint.
+                Ce radar ne remplace pas les systèmes officiels de surveillance aérienne.
+            </p>
+        </div>
+    </div>
+
+</main>
+
+<footer class="fr-footer">
+    <div class="fr-container">
+        <div class="fr-footer__top">
+            <div class="fr-footer__brand">
+                <div class="fr-header__brand-logo" style="width:32px;height:32px;font-size:1rem;">📡</div>
+                <div>
+                    <div>Radar Aérien France</div>
+                    <div style="font-size:0.75rem;font-weight:400;color:var(--text-mention);">
+                        Outil tiers indépendant — non gouvernemental
+                    </div>
+                </div>
+            </div>
+            <ul class="fr-footer__links">
+                <li><a href="#sourcesAnchor">Sources</a></li>
+                <li><a href="#disclaimer">Mentions légales</a></li>
+                <li><a href="#" onclick="event.preventDefault();showAbout()">À propos</a></li>
+            </ul>
+        </div>
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;">
+            <span>Données : ADS-B communautaire · USGS · GDELT · OpenStreetMap</span>
+            <span>© 2026 — MIT</span>
+        </div>
+    </div>
+</footer>
+
+<div class="fr-modal" id="detailModal">
+    <div class="fr-modal__content">
+        <div class="fr-modal__header">
+            <div class="fr-modal__title" id="modalTitle">Détail</div>
+            <button class="fr-modal__close" onclick="closeModal()">×</button>
+        </div>
+        <div class="fr-modal__body" id="modalBody"></div>
+    </div>
+</div>
+
+<script>
+'use strict';
+
+/* ============================================================
+   STATE
+   ============================================================ */
+const state = {
+    charts: { alt: null, speed: null, quakes: null },
+    data: { flights: [], military: [], quakes: [], news: [], notams: [], conflicts: [] },
+    tableRows: [],
+    sortDir: {},
+    socket: null,
+    map: null,
+    drawnItems: null,
+    geoFilter: { active: false, bounds: null },
+    radar: {
+        canvas: null, ctx: null, animationId: null,
+        sweepAngle: 0, paused: false,
+        rangeNM: 250, rangeOptions: [100, 250, 400, 600], rangeIndex: 1,
+        showLabels: false,
+        center: { lat: 48.85, lon: 2.35 }
+    }
+};
+
+/* ============================================================
+   INIT
+   ============================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+    initRadar();
+    initMap();
+    initWebSocket();
+    initIndexedDB();
+});
+
+/* ============================================================
+   RADAR
+   ============================================================ */
+function initRadar() {
+    const canvas = document.getElementById('radarCanvas');
+    if (!canvas) return;
+    state.radar.canvas = canvas;
+    state.radar.ctx = canvas.getContext('2d');
+    resizeRadar();
+    window.addEventListener('resize', resizeRadar);
+    animateRadar();
+}
+
+function resizeRadar() {
+    const container = document.getElementById('radarContainer');
+    const canvas = state.radar.canvas;
+    if (!container || !canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = container.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+    state.radar.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function animateRadar() {
+    const { ctx, canvas } = state.radar;
+    if (!ctx || !canvas) return;
+    const w = canvas.width / (window.devicePixelRatio || 1);
+    const h = canvas.height / (window.devicePixelRatio || 1);
+    const cx = w / 2, cy = h / 2;
+    const maxR = Math.min(cx, cy) - 20;
+
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.strokeStyle = 'rgba(0, 212, 255, 0.15)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i <= 5; i++) {
+        const r = (maxR / 5) * i;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(100, 181, 246, 0.4)';
+        ctx.font = '10px monospace';
+        ctx.fillText(Math.round((state.radar.rangeNM / 5) * i) + ' NM', cx + r + 4, cy - 4);
+    }
+
+    ctx.strokeStyle = 'rgba(0, 212, 255, 0.1)';
+    ctx.beginPath();
+    ctx.moveTo(cx - maxR, cy); ctx.lineTo(cx + maxR, cy);
+    ctx.moveTo(cx, cy - maxR); ctx.lineTo(cx, cy + maxR);
+    ctx.stroke();
+
+    if (!state.radar.paused) {
+        state.radar.sweepAngle += 0.015;
+        if (state.radar.sweepAngle > Math.PI * 2) state.radar.sweepAngle = 0;
+    }
+
+    const sweepGrad = ctx.createConicGradient(state.radar.sweepAngle, cx, cy);
+    sweepGrad.addColorStop(0, 'rgba(0, 255, 136, 0.0)');
+    sweepGrad.addColorStop(0.05, 'rgba(0, 255, 136, 0.25)');
+    sweepGrad.addColorStop(0.1, 'rgba(0, 255, 136, 0.05)');
+    sweepGrad.addColorStop(1, 'rgba(0, 255, 136, 0.0)');
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, maxR, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.fillStyle = sweepGrad;
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = 'rgba(0, 255, 136, 0.8)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(state.radar.sweepAngle) * maxR, cy + Math.sin(state.radar.sweepAngle) * maxR);
+    ctx.stroke();
+
+    const allFlights = [...state.data.flights, ...state.data.military];
+    const rangeDeg = state.radar.rangeNM / 60;
+
+    allFlights.forEach(f => {
+        if (f.lat == null || f.lon == null) return;
+        const dLat = f.lat - state.radar.center.lat;
+        const dLon = (f.lon - state.radar.center.lon) * Math.cos(state.radar.center.lat * Math.PI / 180);
+        const dist = Math.sqrt(dLat * dLat + dLon * dLon);
+        if (dist > rangeDeg) return;
+
+        const angle = Math.atan2(dLon, dLat);
+        const r = (dist / rangeDeg) * maxR;
+        const x = cx + Math.sin(angle) * r;
+        const y = cy - Math.cos(angle) * r;
+
+        let color = '#00d4ff';
+        if (f.military) color = '#FF00FF';
+        else if (f.alt != null && f.alt > 10000) color = '#E1000F';
+        else if (f.alt != null && f.alt < 3000) color = '#FF9900';
+
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+
+        if (state.radar.showLabels && f.callsign && f.callsign !== '—') {
+            ctx.fillStyle = f.military ? 'rgba(255,0,255,0.95)' : 'rgba(255,255,255,0.85)';
+            ctx.font = '9px monospace';
+            ctx.fillText(f.callsign, x + 6, y - 6);
+        }
+    });
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#00ff88';
+    ctx.fill();
+
+    state.radar.animationId = requestAnimationFrame(animateRadar);
+}
+
+function toggleRadarPause() {
+    state.radar.paused = !state.radar.paused;
+    const btn = document.getElementById('radarPauseBtn');
+    btn.querySelector('i').className = state.radar.paused ? 'fas fa-play' : 'fas fa-pause';
+    document.getElementById('radarSweepStatus').textContent = state.radar.paused ? 'PAUSE' : 'ACTIF';
+}
+
+function cycleRadarRange() {
+    state.radar.rangeIndex = (state.radar.rangeIndex + 1) % state.radar.rangeOptions.length;
+    state.radar.rangeNM = state.radar.rangeOptions[state.radar.rangeIndex];
+    document.getElementById('radarRangeLabel').textContent = state.radar.rangeNM + ' NM';
+}
+function toggleRadarLabels() { state.radar.showLabels = !state.radar.showLabels; }
+
+/* ============================================================
+   MAP
+   ============================================================ */
+function initMap() {
+    state.map = L.map('map').setView([46.6, 2.5], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap', maxZoom: 18
+    }).addTo(state.map);
+
+    state.drawnItems = new L.FeatureGroup();
+    state.map.addLayer(state.drawnItems);
+
+    const drawControl = new L.Control.Draw({
+        position: 'topleft',
+        draw: {
+            rectangle: { shapeOptions: { color: '#000091', weight: 2, fillOpacity: 0.15 } },
+            polygon: false, circle: false, marker: false, polyline: false, circlemarker: false
+        },
+        edit: { featureGroup: state.drawnItems }
+    });
+    state.map.addControl(drawControl);
+
+    state.map.on(L.Draw.Event.CREATED, (e) => {
+        state.drawnItems.clearLayers();
+        state.drawnItems.addLayer(e.layer);
+        state.geoFilter.active = true;
+        state.geoFilter.bounds = e.layer.getBounds();
+        document.getElementById('geoFilterStatus').textContent = 'Actif';
+        applyGeoFilter();
+    });
+
+    state.map.on(L.Draw.Event.DELETED, () => {
+        state.geoFilter.active = false;
+        state.geoFilter.bounds = null;
+        document.getElementById('geoFilterStatus').textContent = 'Inactif';
+        applyGeoFilter();
+    });
+
+    setTimeout(() => state.map.invalidateSize(), 300);
+}
+
+function toggleGeoFilter() {
+    if (state.geoFilter.active) {
+        state.drawnItems.clearLayers();
+        state.geoFilter.active = false;
+        state.geoFilter.bounds = null;
+        document.getElementById('geoFilterStatus').textContent = 'Inactif';
+        applyGeoFilter();
+    } else {
+        new L.Draw.Rectangle(state.map).enable();
+    }
+}
+
+function applyGeoFilter() {
+    const bounds = state.geoFilter.bounds;
+    const allAir = [...state.data.military, ...state.data.flights];
+    const filtered = bounds
+        ? allAir.filter(f => f.lat != null && bounds.contains([f.lat, f.lon]))
+        : allAir;
+
+    state.tableRows = filtered.map(f => ({
+        callsign: f.callsign || '—',
+        country: f.country || '—',
+        alt: f.alt, vel: f.vel, lat: f.lat, lon: f.lon,
+        military: !!f.military, raw: f
+    }));
+    renderTable(state.tableRows);
+    document.getElementById('tableCount').textContent =
+        filtered.length + ' contact' + (filtered.length > 1 ? 's' : '') +
+        (bounds ? ' (zone filtrée)' : '');
+}
+
+/* ============================================================
+   WEBSOCKET
+   ============================================================ */
+function initWebSocket() {
+    const socketUrl = window.location.origin;
+    state.socket = io(socketUrl, {
+        reconnection: true,
+        reconnectionDelay: 2000,
+        reconnectionAttempts: Infinity
+    });
+
+    state.socket.on('connect', () => {
+        console.log('[WS] Connecté');
+        document.getElementById('statusDot').classList.remove('fr-badge-dot--off');
+        document.getElementById('statusText').textContent = 'Temps réel actif';
+    });
+
+    state.socket.on('data-update', (data) => {
+        data.quakes = (data.quakes || []).map(q => ({ ...q, time: new Date(q.time) }));
+        state.data = data;
+        updateKPIs();
+        updateCharts();
+        updateTable();
+        updateConflictsPanel();
+        updateMapMarkers();
+        savePositions([...data.flights, ...data.military]);
+
+        document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('fr-FR');
+        document.getElementById('radarLastUpdate').textContent = 'MAJ : ' + new Date().toLocaleTimeString('fr-FR');
+        document.getElementById('radarTargetCount').textContent = data.flights.length + data.military.length;
+
+        const ok = [data.flights.length > 0, data.military.length > 0, data.quakes.length > 0, data.news.length > 0].filter(Boolean).length;
+        document.getElementById('apiStatus').innerHTML = `<i class="fas fa-satellite-dish"></i> Sources : <strong>${ok}/4 actives</strong>`;
+    });
+
+    state.socket.on('disconnect', () => {
+        document.getElementById('statusDot').classList.add('fr-badge-dot--off');
+        document.getElementById('statusText').textContent = 'Reconnexion…';
+    });
+}
+
+/* ============================================================
+   KPIs
+   ============================================================ */
+function updateKPIs() {
+    const { flights, military, quakes } = state.data;
+    document.getElementById('kpiFlights').textContent = flights.length;
+    document.getElementById('kpiMil').textContent = military.length;
+    document.getElementById('kpiMilTrend').textContent = military.length > 0 ? 'Actifs' : 'Aucun';
+
+    const allAir = [...flights, ...military];
+    const withAlt = allAir.filter(f => f.alt != null);
+    const maxAlt = withAlt.length ? Math.max(...withAlt.map(f => f.alt)) : 0;
+    document.getElementById('kpiAltMax').textContent = maxAlt ? maxAlt.toLocaleString('fr-FR') + ' m' : '—';
+
+    document.getElementById('kpiQuakes').textContent = quakes.length;
+    const strong = quakes.filter(q => q.mag >= 4.5).length;
+    document.getElementById('kpiQuakesTrend').textContent = strong > 0 ? strong + ' ≥ M4.5' : 'faible';
+
+    if (withAlt.length) {
+        const avgAlt = Math.round(withAlt.reduce((s, f) => s + f.alt, 0) / withAlt.length);
+        document.getElementById('radarAvgAlt').textContent = avgAlt.toLocaleString('fr-FR');
+    }
+    const withVel = allAir.filter(f => f.vel != null);
+    if (withVel.length) {
+        const avgVel = Math.round(withVel.reduce((s, f) => s + f.vel, 0) / withVel.length);
+        document.getElementById('radarAvgSpeed').textContent = avgVel.toLocaleString('fr-FR');
+    }
+    const approaching = allAir.filter(f => f.alt != null && f.alt < 3000 && f.vel != null && f.vel < 400).length;
+    document.getElementById('radarApproach').textContent = approaching;
+}
+
+/* ============================================================
+   CHARTS
+   ============================================================ */
+function updateCharts() {
+    const allAir = [...state.data.flights, ...state.data.military];
+
+    const altBins = [0, 0, 0, 0, 0];
+    allAir.forEach(f => {
+        if (f.alt == null) return;
+        if (f.alt < 3000) altBins[0]++;
+        else if (f.alt < 6000) altBins[1]++;
+        else if (f.alt < 9000) altBins[2]++;
+        else if (f.alt < 12000) altBins[3]++;
+        else altBins[4]++;
+    });
+    if (state.charts.alt) state.charts.alt.destroy();
+    state.charts.alt = new Chart(document.getElementById('altChart'), {
+        type: 'bar',
+        data: { labels: ['<3km','3–6','6–9','9–12','>12km'],
+            datasets: [{ data: altBins, backgroundColor: ['#FF9900','#00d4ff','#007bff','#000091','#E1000F'], borderRadius: 3 }] },
+        options: chartOpts()
+    });
+
+    const velBins = [0, 0, 0, 0];
+    allAir.forEach(f => {
+        if (f.vel == null) return;
+        if (f.vel < 300) velBins[0]++;
+        else if (f.vel < 600) velBins[1]++;
+        else if (f.vel < 900) velBins[2]++;
+        else velBins[3]++;
+    });
+    if (state.charts.speed) state.charts.speed.destroy();
+    state.charts.speed = new Chart(document.getElementById('speedChart'), {
+        type: 'bar',
+        data: { labels: ['<300','300–600','600–900','>900'],
+            datasets: [{ data: velBins, backgroundColor: ['#CECECE','#00d4ff','#007bff','#000091'], borderRadius: 3 }] },
+        options: chartOpts()
+    });
+
+    const qBins = [0, 0, 0, 0, 0, 0];
+    state.data.quakes.forEach(q => {
+        if (q.mag < 2.5) qBins[0]++;
+        else if (q.mag < 3) qBins[1]++;
+        else if (q.mag < 3.5) qBins[2]++;
+        else if (q.mag < 4) qBins[3]++;
+        else if (q.mag < 5) qBins[4]++;
+        else qBins[5]++;
+    });
+    if (state.charts.quakes) state.charts.quakes.destroy();
+    state.charts.quakes = new Chart(document.getElementById('quakesChart'), {
+        type: 'bar',
+        data: { labels: ['<2.5','2.5-3','3-3.5','3.5-4','4-5','≥5'],
+            datasets: [{ data: qBins, backgroundColor: ['#CECECE','#929292','#716043','#B34000','#E1000F','#000091'], borderRadius: 3 }] },
+        options: chartOpts()
+    });
+}
+
+function chartOpts() {
+    return {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+            y: { beginAtZero: true, grid: { color: '#EEEEEE' }, ticks: { color: '#666', font: { size: 10 } } },
+            x: { grid: { display: false }, ticks: { color: '#666', font: { size: 10 } } }
+        }
+    };
+}
+
+/* ============================================================
+   TABLE
+   ============================================================ */
+function updateTable() {
+    if (state.geoFilter.active) return applyGeoFilter();
+    const allAir = [...state.data.military, ...state.data.flights];
+    state.tableRows = allAir.map(f => ({
+        callsign: f.callsign || '—', country: f.country || '—',
+        alt: f.alt, vel: f.vel, lat: f.lat, lon: f.lon,
+        military: !!f.military, raw: f
+    }));
+    renderTable(state.tableRows);
+}
+
+function renderTable(rows) {
+    const tbody = document.getElementById('eventsBody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:1.5rem;">Aucun aéronef</td></tr>';
+        document.getElementById('tableCount').textContent = '0 contact';
+        return;
+    }
+    tbody.innerHTML = rows.slice(0, 100).map((r, i) => `
+        <tr onclick="showDetail(${i})">
+            <td><strong>${escapeHtml(r.callsign)}</strong></td>
+            <td>${escapeHtml(r.country)}</td>
+            <td>${r.alt != null ? r.alt.toLocaleString('fr-FR') + ' m' : '—'}</td>
+            <td>${r.vel != null ? r.vel.toLocaleString('fr-FR') + ' km/h' : '—'}</td>
+            <td>${r.military ? '<span class="fr-tag fr-tag--mil">MIL</span>' : '<span class="fr-tag fr-tag--info">CIV</span>'}</td>
+        </tr>
+    `).join('');
+    document.getElementById('tableCount').textContent = rows.length + ' contact' + (rows.length > 1 ? 's' : '');
+}
+
+function filterTable() {
+    const q = document.getElementById('tableSearch').value.trim().toLowerCase();
+    if (!q) return renderTable(state.tableRows);
+    renderTable(state.tableRows.filter(r => (r.callsign + ' ' + r.country).toLowerCase().includes(q)));
+}
+
+function sortTable(col) {
+    const keys = ['callsign', 'country', 'alt', 'vel', 'military'];
+    const key = keys[col];
+    state.sortDir[col] = !state.sortDir[col];
+    const dir = state.sortDir[col] ? 1 : -1;
+    const sorted = [...state.tableRows].sort((a, b) => {
+        const av = a[key], bv = b[key];
+        if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+        if (typeof av === 'boolean' && typeof bv === 'boolean') return (av === bv ? 0 : (av ? -1 : 1)) * dir;
+        return String(av).localeCompare(String(bv)) * dir;
+    });
+    renderTable(sorted);
+}
+
+/* ============================================================
+   CONFLITS NOTAM
+   ============================================================ */
+function updateConflictsPanel() {
+    const conflicts = state.data.conflicts || [];
+    document.getElementById('conflictCount').textContent = conflicts.length;
+    const list = document.getElementById('conflictsList');
+    if (!conflicts.length) {
+        list.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--text-mention);font-size:0.85rem;">Aucun conflit détecté</div>';
+        return;
+    }
+    list.innerHTML = conflicts.map(c => `
+        <div style="padding:0.75rem 1rem;border-bottom:1px solid var(--border);font-size:0.85rem;">
+            <div style="display:flex;justify-content:space-between;">
+                <strong style="color:${c.military ? '#B300B3' : 'var(--blue-france)'};">${c.military ? '⚔ ' : '✈ '}${escapeHtml(c.callsign)}</strong>
+                <span class="fr-tag fr-tag--error">${c.distanceNM} NM</span>
+            </div>
+            <div style="margin-top:0.3rem;color:var(--text-mention);font-size:0.75rem;">NOTAM ${escapeHtml(c.notamId)} · FIR ${escapeHtml(c.notamFir)}</div>
+        </div>
+    `).join('');
+}
+
+/* ============================================================
+   MAP MARKERS
+   ============================================================ */
+function updateMapMarkers() {
+    if (!state.map) return;
+    if (state._markers) state._markers.forEach(m => state.map.removeLayer(m));
+    state._markers = [];
+
+    [...state.data.military, ...state.data.flights].slice(0, 200).forEach(f => {
+        if (f.lat == null) return;
+        const color = f.military ? '#FF00FF' : '#000091';
+        const m = L.circleMarker([f.lat, f.lon], {
+            radius: 3, color, fillColor: color, fillOpacity: 0.7, weight: 1
+        }).addTo(state.map);
+        m.bindPopup(`<strong style="color:${color};">${f.military ? '⚔' : '✈'} ${escapeHtml(f.callsign)}</strong><br>${escapeHtml(f.country)}<br>Alt : ${f.alt != null ? f.alt + ' m' : '—'}`);
+        state._markers.push(m);
+    });
+}
+
+/* ============================================================
+   INDEXEDDB — Historique
+   ============================================================ */
+let db = null;
+function initIndexedDB() {
+    const req = indexedDB.open('RadarDB', 1);
+    req.onupgradeneeded = (e) => {
+        const d = e.target.result;
+        if (!d.objectStoreNames.contains('positions')) {
+            const s = d.createObjectStore('positions', { keyPath: 'id', autoIncrement: true });
+            s.createIndex('icao24', 'icao24');
+            s.createIndex('timestamp', 'timestamp');
+        }
+    };
+    req.onsuccess = (e) => { db = e.target.result; };
+}
+
+function savePositions(flights) {
+    if (!db) return;
+    const tx = db.transaction('positions', 'readwrite');
+    const store = tx.objectStore('positions');
+    const now = Date.now();
+    flights.forEach(f => {
+        if (!f.icao24 || f.lat == null) return;
+        store.add({ icao24: f.icao24, callsign: f.callsign, lat: f.lat, lon: f.lon, alt: f.alt, timestamp: now });
+    });
+}
+
+/* ============================================================
+   EXPORT CSV
+   ============================================================ */
+function exportCSV() {
+    const allAir = [...state.data.military, ...state.data.flights];
+    const headers = ['Type', 'Indicatif', 'Pays', 'Latitude', 'Longitude', 'Altitude (m)', 'Vitesse (km/h)'];
+    const rows = allAir.map(f => [
+        f.military ? 'MILITAIRE' : 'CIVIL',
+        f.callsign, f.country,
+        f.lat != null ? f.lat.toFixed(4) : '',
+        f.lon != null ? f.lon.toFixed(4) : '',
+        f.alt != null ? f.alt : '',
+        f.vel != null ? f.vel : ''
+    ]);
+
+    const escape = (v) => {
+        const s = String(v == null ? '' : v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+
+    const lines = [
+        '# RAPPORT RADAR AÉRIEN — ' + new Date().toLocaleString('fr-FR'),
+        '# Outil tiers non gouvernemental — données ADS-B publiques',
+        '',
+        '## AÉRONEFS (' + allAir.length + ')',
+        headers.join(','),
+        ...rows.map(r => r.map(escape).join(','))
+    ];
+
+    const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `radar_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+/* ============================================================
+   EXPORT PDF
+   ============================================================ */
+function exportPDF() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const allAir = [...state.data.military, ...state.data.flights];
+    const now = new Date();
+
+    doc.setFillColor(0, 0, 145);
+    doc.rect(0, 0, 210, 25, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('RAPPORT RADAR AÉRIEN', 14, 12);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Outil tiers non gouvernemental — Données ADS-B publiques', 14, 19);
+
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(10);
+    doc.text('Généré le : ' + now.toLocaleString('fr-FR'), 14, 33);
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('RÉSUMÉ', 14, 43);
+
+    const summary = [
+        ['Aéronefs civils', state.data.flights.length],
+        ['Aéronefs militaires', state.data.military.length],
+        ['Séismes (24 h)', state.data.quakes.length],
+        ['Conflits NOTAM', state.data.conflicts?.length || 0]
+    ];
+    let y = 50;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    summary.forEach(([label, val]) => {
+        doc.text(label + ' :', 14, y);
+        doc.setFont('helvetica', 'bold');
+        doc.text(String(val), 100, y);
+        doc.setFont('helvetica', 'normal');
+        y += 6;
+    });
+
+    if (allAir.length > 0) {
+        y += 6;
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text('AÉRONEFS DÉTECTÉS (extrait)', 14, y);
+        y += 4;
+
+        doc.autoTable({
+            startY: y,
+            head: [['Indicatif', 'Type', 'Pays', 'Altitude', 'Vitesse']],
+            body: allAir.slice(0, 25).map(f => [
+                f.callsign, f.military ? 'MIL' : 'CIV', f.country,
+                f.alt != null ? f.alt.toLocaleString('fr-FR') + ' m' : '—',
+                f.vel != null ? f.vel.toLocaleString('fr-FR') + ' km/h' : '—'
+            ]),
+            theme: 'striped',
+            headStyles: { fillColor: [0, 0, 145], textColor: 255, fontSize: 9 },
+            bodyStyles: { fontSize: 8 },
+            margin: { left: 14, right: 14 }
+        });
+    }
+
+    const pages = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(120, 120, 120);
+        doc.text('Page ' + i + '/' + pages + ' — Outil tiers non gouvernemental', 14, 290);
+    }
+
+    doc.save(`radar_rapport_${now.toISOString().slice(0, 19).replace(/[:T]/g, '-')}.pdf`);
+}
+
+/* ============================================================
+   MODAL
+   ============================================================ */
+function showDetail(index) {
+    const r = state.tableRows[index];
+    if (!r) return;
+    document.getElementById('modalTitle').textContent = (r.military ? '⚔ ' : '✈ ') + r.callsign;
+    document.getElementById('modalBody').innerHTML = `
+        <p style="margin-bottom:0.75rem;"><strong>Indicatif :</strong> ${escapeHtml(r.callsign)}</p>
+        <p style="margin-bottom:0.75rem;"><strong>Pays :</strong> ${escapeHtml(r.country)}</p>
+        <p style="margin-bottom:0.75rem;"><strong>Altitude :</strong> ${r.alt != null ? r.alt.toLocaleString('fr-FR') + ' m' : '—'}</p>
+        <p style="margin-bottom:0.75rem;"><strong>Vitesse :</strong> ${r.vel != null ? r.vel.toLocaleString('fr-FR') + ' km/h' : '—'}</p>
+        <p style="margin-bottom:0.75rem;"><strong>Position :</strong> ${r.lat != null ? r.lat.toFixed(4) + ', ' + r.lon.toFixed(4) : '—'}</p>
+    `;
+    document.getElementById('detailModal').classList.add('active');
+}
+function closeModal() { document.getElementById('detailModal').classList.remove('active'); }
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+/* ============================================================
+   NAV
+   ============================================================ */
+document.querySelectorAll('.fr-nav__link').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.fr-nav__link').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const targets = { overview: null, radar: 'radarAnchor', map: 'mapAnchor', sources: 'sourcesAnchor' };
+        const id = targets[btn.dataset.tab];
+        if (id) {
+            const el = document.getElementById(id);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+});
+
+/* ============================================================
+   UTILS
+   ============================================================ */
+function escapeHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function showAbout() {
+    alert("Radar Aérien France\n\nOutil tiers indépendant, non gouvernemental.\nAucune affiliation avec l'État français.\n\nSources : adsb.lol · adsb.fi · USGS · GDELT · OpenStreetMap");
+}
+
+window.addEventListener('beforeunload', () => {
+    if (state.radar.animationId) cancelAnimationFrame(state.radar.animationId);
+    if (state.socket) state.socket.disconnect();
+});
+</script>
+</body>
+</html>
