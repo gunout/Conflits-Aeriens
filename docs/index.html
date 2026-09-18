@@ -358,7 +358,7 @@ main { padding: 1.5rem 0 3rem; }
         <div class="fr-kpi fr-kpi--success">
             <div class="fr-kpi__label"><i class="fas fa-plane"></i> Aéronefs détectés</div>
             <div class="fr-kpi__value" id="kpiFlights">—</div>
-            <span class="fr-kpi__trend" id="kpiFlightsTrend">Rayon 250 NM Paris</span>
+            <span class="fr-kpi__trend" id="kpiFlightsTrend">PocketWorld (CORS ouvert)</span>
         </div>
         <div class="fr-kpi fr-kpi--warning">
             <div class="fr-kpi__label"><i class="fas fa-fighter-jet"></i> Militaires probables</div>
@@ -484,7 +484,7 @@ main { padding: 1.5rem 0 3rem; }
                 <div style="font-size:0.75rem;font-weight:400;color:var(--text-mention);">Outil tiers indépendant — non gouvernemental</div>
             </div>
         </div>
-        <div>Hébergement : GitHub Pages · Source : airplanes.live (CORS natif) · Séismes : USGS · © 2026 MIT</div>
+        <div>Hébergement : GitHub Pages · Source : PocketWorld (CORS ouvert) · Séismes : USGS · © 2026 MIT</div>
     </div>
 </footer>
 
@@ -503,20 +503,13 @@ main { padding: 1.5rem 0 3rem; }
 
 /* ============================================================
    SOURCES DE DONNÉES
-   - airplanes.live : CORS ouvert, appel direct sans proxy
-   - USGS : CORS ouvert, appel direct
-   - PocketWorld : repli, via proxy cors.lol uniquement si besoin
+   - PocketWorld : CORS ouvert, aucune clé — source principale
+   - adsb.fi : CORS incertain — source de secours
+   - USGS : CORS ouvert — séismes
    ============================================================ */
-const ADSB_SOURCE = {
-    name: 'airplanes.live',
-    base: 'https://api.airplanes.live/v2'
-};
 
-// Proxy utilisé UNIQUEMENT pour le repli PocketWorld
-const FALLBACK_PROXY = 'https://api.cors.lol/?url=';
-
+const FR_BBOX = '-5.5,41,9.8,51.5'; // west,south,east,north
 const FR_CENTER = { lat: 47.0, lon: 2.4, dist: 250 };
-const FR_BBOX = { latMin: 41.0, latMax: 51.5, lonMin: -5.5, lonMax: 9.8 };
 
 const CATEGORY_FR = {
     A1: 'Léger', A2: 'Petit', A3: 'Liner', A4: 'Gros', A5: 'Lourd', A6: 'Super',
@@ -541,104 +534,80 @@ async function fetchJSON(url, timeoutMs = 12000) {
 }
 
 /* ============================================================
-   FETCH AÉRONEFS — DIRECT via airplanes.live (sans proxy)
+   FETCH AÉRONEFS — PocketWorld en priorité (CORS ouvert)
    ============================================================ */
 async function fetchFlights() {
-    console.log('[flights] Appel direct à airplanes.live (CORS natif)…');
-
-    // Format de l'API airplanes.live : /v2/point/{lat}/{lon}/{radius_nm}
-    const url = `${ADSB_SOURCE.base}/point/${FR_CENTER.lat}/${FR_CENTER.lon}/${FR_CENTER.dist}`;
-
+    // 1. PocketWorld (CORS ouvert, pas de proxy)
     try {
+        console.log('[flights] PocketWorld (CORS ouvert)…');
+        const url = `https://pocketworld.org/api/flights?wire=1&bbox=${FR_BBOX}`;
+        const j = await fetchJSON(url);
+        const fields = j.flight_fields || [];
+        const rows = j.flight_rows || [];
+        console.log(`[flights] ✓ ${rows.length} aéronefs via PocketWorld`);
+
+        const flights = rows.map(row => {
+            const a = {};
+            fields.forEach((f, i) => a[f] = row[i]);
+            return {
+                icao24: (a.icao24 || '').toLowerCase(),
+                callsign: (a.callsign || a.icao24 || '').trim() || '—',
+                lat: a.lat, lon: a.lng,
+                alt: typeof a.alt === 'number' ? Math.round(a.alt) : null,
+                vel: typeof a.velocity === 'number' ? Math.round(a.velocity * 1.852) : null,
+                country: a.country || '—',
+                typecode: a.typecode || '—',
+                registration: a.registration || '',
+                category: a.category || '—',
+                transportKind: a.transport_kind || '—',
+                military: false
+            };
+        }).filter(f => f.lat != null && f.lon != null);
+
+        if (flights.length > 0) {
+            state.lastSource = 'PocketWorld (direct)';
+            return flights;
+        }
+        console.warn('[flights] PocketWorld : réponse vide');
+    } catch (e) {
+        console.warn(`[flights] ✗ PocketWorld : ${e.message}`);
+    }
+
+    // 2. adsb.fi (secours — peut échouer sur CORS)
+    try {
+        console.log('[flights] adsb.fi (secours)…');
+        const url = `https://opendata.adsb.fi/api/v3/lat/${FR_CENTER.lat}/lon/${FR_CENTER.lon}/dist/${FR_CENTER.dist}`;
         const j = await fetchJSON(url);
         const acs = j.ac || [];
-        console.log(`[flights] ✓ ${acs.length} aéronefs bruts reçus`);
+        console.log(`[flights] ✓ ${acs.length} aéronefs via adsb.fi`);
 
-        // Filtrage + dédoublonnage par ICAO24
-        const byHex = new Map();
-        for (const ac of acs) {
-            if (ac.lat == null || ac.lon == null) continue;
-            if (ac.alt_baro === 'ground') continue;
-            if (ac.lat < FR_BBOX.latMin || ac.lat > FR_BBOX.latMax) continue;
-            if (ac.lon < FR_BBOX.lonMin || ac.lon > FR_BBOX.lonMax) continue;
+        const flights = acs.map(ac => ({
+            icao24: (ac.hex || '').replace('~', '').trim().toLowerCase(),
+            callsign: (ac.flight || ac.hex || '').trim() || '—',
+            lat: ac.lat, lon: ac.lon,
+            alt: ftToM(ac.alt_baro) ?? ftToM(ac.alt_geom),
+            vel: typeof ac.gs === 'number' ? Math.round(ac.gs * 1.852) : null,
+            country: ac.t || '—',
+            typecode: ac.t || '—',
+            registration: ac.r || '',
+            category: CATEGORY_FR[ac.category] || ac.category || '—',
+            transportKind: 'adsb.fi',
+            military: !!((ac.dbFlags || 0) & 1)
+        })).filter(f => f.lat != null && f.lon != null);
 
-            const key = (ac.hex || '').replace('~', '').trim().toLowerCase();
-            if (!key) continue;
-
-            const prev = byHex.get(key);
-            if (!prev || (ac.seen_pos ?? 999) < (prev.seen_pos ?? 999)) {
-                byHex.set(key, ac);
-            }
+        if (flights.length > 0) {
+            state.lastSource = 'adsb.fi (direct)';
+            return flights;
         }
-
-        const total = [...byHex.values()];
-        state.lastSource = 'airplanes.live (direct)';
-        console.log(`[flights] ✓ ${total.length} aéronefs uniques en France`);
-        return normalizeADSB(total, 'airplanes.live');
     } catch (e) {
-        console.warn(`[flights] ✗ ${e.message} → tentative de repli`);
+        console.warn(`[flights] ✗ adsb.fi : ${e.message}`);
     }
 
-    // Repli : PocketWorld via proxy (si airplanes.live tombe)
-    try {
-        const res = await fetchPocketWorldFlights();
-        state.lastSource = 'PocketWorld (proxy)';
-        return res;
-    } catch (e) {
-        console.warn('[flights] ✗ Repli échoué : ' + e.message);
-        return [];
-    }
-}
-
-function normalizeADSB(list, srcName) {
-    return list.map(ac => ({
-        icao24: (ac.hex || '').replace('~', '').trim().toLowerCase(),
-        callsign: (ac.flight || ac.hex || '').trim() || '—',
-        lat: ac.lat, lon: ac.lon,
-        alt: ftToM(ac.alt_baro) ?? ftToM(ac.alt_geom),
-        vel: typeof ac.gs === 'number' ? Math.round(ac.gs * 1.852) : null,
-        country: ac.t || '—',
-        typecode: ac.t || '—',
-        registration: ac.r || '',
-        category: CATEGORY_FR[ac.category] || ac.category || '—',
-        transportKind: srcName,
-        military: !!((ac.dbFlags || 0) & 1)
-    })).filter(f => f.lat != null && f.lon != null);
+    return [];
 }
 
 /* ============================================================
-   REPLI POCKETWORLD (via proxy uniquement en cas d'échec)
-   ============================================================ */
-const POCKETWORLD = 'https://pocketworld.org/api';
-const BBOX_FRANCE = '-5,42,9,51';
-
-async function fetchPocketWorldFlights() {
-    const target = `${POCKETWORLD}/flights?wire=1&bbox=${BBOX_FRANCE}`;
-    const j = await fetchJSON(FALLBACK_PROXY + encodeURIComponent(target));
-    const fields = j.flight_fields || [];
-    const rows = j.flight_rows || [];
-    console.log('[flights] ✓ ' + rows.length + ' via PocketWorld (repli)');
-    return rows.map(row => {
-        const a = {};
-        fields.forEach((f, i) => a[f] = row[i]);
-        return {
-            icao24: a.icao24,
-            callsign: (a.callsign || a.icao24 || '').trim() || '—',
-            lat: a.lat, lon: a.lng,
-            alt: typeof a.alt === 'number' ? Math.round(a.alt) : null,
-            vel: typeof a.velocity === 'number' ? Math.round(a.velocity * 1.852) : null,
-            country: a.country || '—',
-            typecode: a.typecode || '—',
-            registration: a.registration || '',
-            category: a.category || '—',
-            transportKind: a.transport_kind || '—',
-            military: false
-        };
-    }).filter(f => f.lat != null && f.lon != null);
-}
-
-/* ============================================================
-   FETCH SÉISMES — USGS direct (CORS natif)
+   FETCH SÉISMES — USGS (CORS ouvert)
    ============================================================ */
 async function fetchEarthquakes() {
     try {
@@ -1166,9 +1135,9 @@ function showAbout() {
         non édité, non approuvé et non affilié à l'État français ou à l'Armée de l'Air.</p>
         <p style="margin-top:0.75rem;">Il agrège uniquement des <strong>données ADS-B publiques</strong> :</p>
         <ul style="margin:0.75rem 0 0 1.25rem;">
-            <li><strong>airplanes.live</strong> — source principale, appel direct (CORS natif)</li>
-            <li><strong>PocketWorld</strong> — repli via proxy cors.lol</li>
-            <li><strong>USGS</strong> — séismes M ≥ 2.5 des dernières 24 h (CORS natif)</li>
+            <li><strong>PocketWorld</strong> — source principale, CORS ouvert</li>
+            <li><strong>adsb.fi</strong> — source de secours</li>
+            <li><strong>USGS</strong> — séismes M ≥ 2.5 des dernières 24 h (CORS ouvert)</li>
         </ul>
         <p style="margin-top:0.75rem;font-size:0.8rem;color:var(--text-mention);">
             Code source : MIT © 2026.
