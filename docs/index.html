@@ -358,7 +358,7 @@ main { padding: 1.5rem 0 3rem; }
         <div class="fr-kpi fr-kpi--success">
             <div class="fr-kpi__label"><i class="fas fa-plane"></i> Aéronefs détectés</div>
             <div class="fr-kpi__value" id="kpiFlights">—</div>
-            <span class="fr-kpi__trend" id="kpiFlightsTrend">Fusion adsb.lol + adsb.fi</span>
+            <span class="fr-kpi__trend" id="kpiFlightsTrend">Rayon 250 NM Paris</span>
         </div>
         <div class="fr-kpi fr-kpi--warning">
             <div class="fr-kpi__label"><i class="fas fa-fighter-jet"></i> Militaires probables</div>
@@ -484,7 +484,7 @@ main { padding: 1.5rem 0 3rem; }
                 <div style="font-size:0.75rem;font-weight:400;color:var(--text-mention);">Outil tiers indépendant — non gouvernemental</div>
             </div>
         </div>
-        <div>Hébergement : GitHub Pages · Sources : adsb.lol + adsb.fi (fusion) · Repli PocketWorld · USGS · © 2026 MIT</div>
+        <div>Hébergement : GitHub Pages · Proxy : cors.lol · Sources : adsb.lol + adsb.fi · USGS · © 2026 MIT</div>
     </div>
 </footer>
 
@@ -502,24 +502,28 @@ main { padding: 1.5rem 0 3rem; }
 'use strict';
 
 /* ============================================================
-   RÉSEAU v3 — FUSION PARALLÈLE
-   - adsb.lol + adsb.fi interrogés EN PARALLÈLE
-   - Fusion par ICAO24 (dédoublonnage)
-   - Repli PocketWorld via cascade de proxys durcis
+   PROXY CORS — cors.lol (gratuit, sans inscription)
+   Documentation : https://cors.lol/
+   Limite : ~30 requêtes/minute (rate-limited)
+   ============================================================ */
+const PROXY = 'https://api.cors.lol/?url=';
+
+/* Fallbacks en cas de 429 */
+const FALLBACK_PROXIES = [
+    (url) => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
+    (url) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+    (url) => 'https://corsproxy.io/?url=' + encodeURIComponent(url)
+];
+
+/* ============================================================
+   SOURCES ADS-B
    ============================================================ */
 const ADSB_DIRECT = [
     { name: 'adsb.lol', base: 'https://api.adsb.lol/v2' },
     { name: 'adsb.fi',  base: 'https://opendata.adsb.fi/api/v2' }
 ];
 
-// 5 cercles de 250 NM max pour couvrir l'hexagone
-const FR_COVER = [
-    { lat: 47.0, lon: 2.4,  dist: 250 },   // Cœur (Paris, Lyon, Bordeaux, Lille)
-    { lat: 49.0, lon: 2.5,  dist: 180 },   // Nord / Île-de-France
-    { lat: 48.6, lon: -4.0, dist: 150 },   // Bretagne / Brest
-    { lat: 43.0, lon: 7.5,  dist: 150 },   // Sud-Est / Nice / Corse
-    { lat: 43.8, lon: 0.5,  dist: 180 }    // Sud-Ouest / Toulouse / Biarritz / Perpignan
-];
+const FR_CENTER = { lat: 47.0, lon: 2.4, dist: 250 };
 const FR_BBOX = { latMin: 41.0, latMax: 51.5, lonMin: -5.5, lonMax: 9.8 };
 
 const CATEGORY_FR = {
@@ -529,42 +533,81 @@ const CATEGORY_FR = {
 };
 const ftToM = v => (typeof v === 'number' ? Math.round(v * 0.3048) : null);
 
-async function fetchJSONRaw(url, timeoutMs = 10000, unwrap = null) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+let adsbBackoffUntil = 0;
+
+/* ============================================================
+   FETCH avec cascade de proxys
+   ============================================================ */
+async function fetchWithProxy(targetUrl, timeoutMs = 12000) {
+    // Essai principal avec cors.lol
     try {
-        const r = await fetch(url, { signal: ctrl.signal });
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+        const r = await fetch(PROXY + encodeURIComponent(targetUrl), { signal: ctrl.signal });
+        clearTimeout(timer);
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const text = (await r.text()).trim();
-        if (!text.startsWith('{') && !text.startsWith('[')) throw new Error('Réponse non-JSON');
-        return unwrap ? unwrap(JSON.parse(text)) : JSON.parse(text);
-    } finally { clearTimeout(timer); }
+        if (!text.startsWith('{') && !text.startsWith('[')) throw new Error('Non-JSON');
+        return JSON.parse(text);
+    } catch (e) {
+        console.warn('[cors.lol] ✗ ' + e.message + ' → fallback');
+    }
+
+    // Fallbacks
+    for (const fallback of FALLBACK_PROXIES) {
+        try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+            const r = await fetch(fallback(targetUrl), { signal: ctrl.signal });
+            clearTimeout(timer);
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const text = (await r.text()).trim();
+            if (!text.startsWith('{') && !text.startsWith('[')) throw new Error('Non-JSON');
+            const host = new URL(fallback(targetUrl)).hostname;
+            console.log('[proxy] ✓ ' + host);
+            return JSON.parse(text);
+        } catch (e) {
+            console.warn('[proxy] ✗ ' + e.message);
+        }
+    }
+
+    throw new Error('Tous les proxys ont échoué');
 }
 
-/* --- Source directe (CORS natif) : 5 requêtes séquentielles, dédup par hex --- */
+/* ============================================================
+   FETCH ADS-B
+   ============================================================ */
 async function fetchADSBSource(src) {
-    const byHex = new Map();
-    let lastErr = null;
-    let errors = 0;
-    for (const c of FR_COVER) {
-        try {
-            const j = await fetchJSONRaw(`${src.base}/lat/${c.lat}/lon/${c.lon}/dist/${c.dist}`);
-            for (const ac of (j.ac || [])) {
-                if (ac.lat == null || ac.lon == null) continue;
-                if (ac.alt_baro === 'ground') continue;
-                if (ac.lat < FR_BBOX.latMin || ac.lat > FR_BBOX.latMax) continue;
-                if (ac.lon < FR_BBOX.lonMin || ac.lon > FR_BBOX.lonMax) continue;
-                const key = (ac.hex || '').replace('~', '').trim().toLowerCase();
-                if (!key) continue;
-                const prev = byHex.get(key);
-                // Garde la position la plus fraîche
-                if (!prev || (ac.seen_pos ?? 999) < (prev.seen_pos ?? 999)) byHex.set(key, ac);
-            }
-        } catch (e) { lastErr = e; errors++; }
+    if (Date.now() < adsbBackoffUntil) {
+        console.log(`[adsb:${src.name}] backoff actif`);
+        return [];
     }
-    // Si toutes les requêtes ont échoué, on lève l'erreur
-    if (errors === FR_COVER.length && lastErr) throw lastErr;
-    return [...byHex.values()];
+
+    const target = `${src.base}/lat/${FR_CENTER.lat}/lon/${FR_CENTER.lon}/dist/${FR_CENTER.dist}`;
+    try {
+        const j = await fetchWithProxy(target);
+        const byHex = new Map();
+        for (const ac of (j.ac || [])) {
+            if (ac.lat == null || ac.lon == null) continue;
+            if (ac.alt_baro === 'ground') continue;
+            if (ac.lat < FR_BBOX.latMin || ac.lat > FR_BBOX.latMax) continue;
+            if (ac.lon < FR_BBOX.lonMin || ac.lon > FR_BBOX.lonMax) continue;
+            const key = (ac.hex || '').replace('~', '').trim().toLowerCase();
+            if (!key) continue;
+            const prev = byHex.get(key);
+            if (!prev || (ac.seen_pos ?? 999) < (prev.seen_pos ?? 999)) byHex.set(key, ac);
+        }
+        console.log(`[adsb:${src.name}] ✓ ${byHex.size} aéronefs`);
+        return [...byHex.values()];
+    } catch (e) {
+        if (/429/.test(e.message)) {
+            adsbBackoffUntil = Date.now() + 300000;
+            console.warn(`[adsb:${src.name}] ✗ 429 → pause 5 min`);
+        } else {
+            console.warn(`[adsb:${src.name}] ✗ ${e.message}`);
+        }
+        throw e;
+    }
 }
 
 function normalizeADSB(list, srcName) {
@@ -583,52 +626,40 @@ function normalizeADSB(list, srcName) {
     })).filter(f => f.lat != null && f.lon != null);
 }
 
-/* --- Cascade de proxys (repli PocketWorld) --- */
-const CORS_PROXIES = [
-    { name: 'corsproxy.io',   build: u => 'https://corsproxy.io/?url=' + encodeURIComponent(u) },
-    { name: 'codetabs',       build: u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u) },
-    { name: 'cors.lol',       build: u => 'https://api.cors.lol/?url=' + encodeURIComponent(u) },
-    { name: 'allorigins/raw', build: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
-    { name: 'allorigins/get', build: u => 'https://api.allorigins.win/get?url=' + encodeURIComponent(u),
-                              unwrap: d => JSON.parse(d.contents) },
-    { name: 'cors.workers',   build: u => 'https://test.cors.workers.dev/?' + u }
-];
-
-let stickyProxy = null;
-const proxyFails = new Map();
-
-async function fetchViaProxies(targetUrl) {
-    const now = Date.now();
-    const candidates = CORS_PROXIES.map((p, i) => ({ p, i }))
-        .filter(({ i }) => !(proxyFails.get(i)?.until > now));
-    candidates.sort((a, b) => (b.i === stickyProxy) - (a.i === stickyProxy));
-
-    let lastErr = null;
-    for (const { p, i } of candidates) {
-        try {
-            const data = await fetchJSONRaw(p.build(targetUrl), 8000, p.unwrap);
-            stickyProxy = i; proxyFails.delete(i);
-            console.log(`[proxy] ✓ ${p.name}`);
-            return data;
-        } catch (e) {
-            lastErr = e;
-            const s = proxyFails.get(i) || { n: 0, until: 0 };
-            s.n++;
-            const step = /429/.test(e.message) ? 120000 : 30000;
-            s.until = Date.now() + Math.min(s.n * step, 600000);
-            proxyFails.set(i, s);
-            console.warn(`[proxy] ✗ ${p.name} → ${e.message} (pause ${Math.round((s.until - Date.now()) / 1000)}s)`);
-        }
-    }
-    throw lastErr || new Error('Aucun proxy disponible');
-}
-
 /* ============================================================
-   CONFIGURATION
+   REPLI PocketWorld
    ============================================================ */
 const POCKETWORLD = 'https://pocketworld.org/api';
 const BBOX_FRANCE = '-5,42,9,51';
 
+async function fetchPocketWorldFlights() {
+    const target = `${POCKETWORLD}/flights?wire=1&bbox=${BBOX_FRANCE}`;
+    const j = await fetchWithProxy(target);
+    const fields = j.flight_fields || [];
+    const rows = j.flight_rows || [];
+    console.log('[flights] ✓ ' + rows.length + ' via PocketWorld');
+    return rows.map(row => {
+        const a = {};
+        fields.forEach((f, i) => a[f] = row[i]);
+        return {
+            icao24: a.icao24,
+            callsign: (a.callsign || a.icao24 || '').trim() || '—',
+            lat: a.lat, lon: a.lng,
+            alt: typeof a.alt === 'number' ? Math.round(a.alt) : null,
+            vel: typeof a.velocity === 'number' ? Math.round(a.velocity * 1.852) : null,
+            country: a.country || '—',
+            typecode: a.typecode || '—',
+            registration: a.registration || '',
+            category: a.category || '—',
+            transportKind: a.transport_kind || '—',
+            military: false
+        };
+    }).filter(f => f.lat != null && f.lon != null);
+}
+
+/* ============================================================
+   ÉTAT GLOBAL
+   ============================================================ */
 const state = {
     charts: { alt: null, speed: null, quakes: null },
     data: { flights: [], military: [], quakes: [] },
@@ -636,7 +667,6 @@ const state = {
     _renderedRows: [],
     sortDir: {},
     lastSource: null,
-    lastStats: null,
     map: null,
     drawnItems: null,
     geoFilter: { active: false, bounds: null },
@@ -680,15 +710,18 @@ function isMilitary(a) {
     return cat.includes('mil');
 }
 
+/* ============================================================
+   INIT
+   ============================================================ */
 document.addEventListener('DOMContentLoaded', () => {
     initRadar();
     initMap();
     refreshAll();
-    state.updateInterval = setInterval(refreshAll, 45000);
+    state.updateInterval = setInterval(refreshAll, 90000);
 });
 
 /* ============================================================
-   RADAR
+   RADAR (Canvas)
    ============================================================ */
 function initRadar() {
     const canvas = document.getElementById('radarCanvas');
@@ -822,7 +855,7 @@ function cycleRadarRange() {
 function toggleRadarLabels() { state.radar.showLabels = !state.radar.showLabels; }
 
 /* ============================================================
-   MAP
+   CARTE
    ============================================================ */
 function initMap() {
     state.map = L.map('map').setView([46.6, 2.5], 5);
@@ -896,88 +929,45 @@ function applyGeoFilter() {
 }
 
 /* ============================================================
-   FETCH — FUSION PARALLÈLE + repli PocketWorld
+   FETCH — fusion ADS-B + repli PocketWorld
    ============================================================ */
 async function fetchFlights() {
-    console.log('[flights] Fusion parallèle adsb.lol + adsb.fi…');
+    console.log('[flights] Fusion adsb.lol + adsb.fi via cors.lol…');
 
-    // 1. Lance les deux sources EN PARALLÈLE
     const settled = await Promise.allSettled(
         ADSB_DIRECT.map(async src => {
-            const t0 = performance.now();
             const acs = await fetchADSBSource(src);
-            const dt = Math.round(performance.now() - t0);
-            return { src: src.name, list: acs, ms: dt };
+            return { src: src.name, list: acs };
         })
     );
 
-    // 2. Récupère les résultats (même partiels)
-    const results = settled
-        .filter(r => r.status === 'fulfilled')
-        .map(r => r.value);
-
-    // 3. Fusion par ICAO24
+    const results = settled.filter(r => r.status === 'fulfilled').map(r => r.value);
     const byHex = new Map();
-    const perSource = {};
-    for (const { src, list, ms } of results) {
-        perSource[src] = list.length;
-        console.log(`[adsb:${src}] ${list.length} aéronefs en ${ms} ms`);
+    for (const { src, list } of results) {
         for (const ac of list) {
             const key = (ac.hex || '').replace('~', '').trim().toLowerCase();
             if (!key) continue;
             const prev = byHex.get(key);
-            // Priorité : garder la donnée la plus fraîche
-            if (!prev || (ac.seen_pos ?? 999) < (prev.seen_pos ?? 999)) {
-                byHex.set(key, ac);
-            }
+            if (!prev || (ac.seen_pos ?? 999) < (prev.seen_pos ?? 999)) byHex.set(key, ac);
         }
     }
 
-    // 4. Log si une source est défaillante
-    const failures = settled.filter(r => r.status === 'rejected');
-    failures.forEach((r, i) => {
-        console.warn(`[adsb:${ADSB_DIRECT[i]?.name || '?'}] ✗`, r.reason?.message || 'échec');
-    });
-
-    // 5. Si au moins une source a répondu, on retourne la fusion
     if (byHex.size > 0) {
         const total = [...byHex.values()];
-        state.lastSource = 'adsb.lol + adsb.fi (fusion)';
-        state.lastStats = perSource;
-        console.log(`[flights] ✓ Fusion : ${total.length} aéronefs uniques (${Object.entries(perSource).map(([k, v]) => `${k}=${v}`).join(', ')})`);
+        state.lastSource = 'adsb.lol + adsb.fi (cors.lol)';
+        console.log(`[flights] ✓ Fusion : ${total.length} aéronefs uniques`);
         return normalizeADSB(total, 'adsb.lol+adsb.fi');
     }
 
-    // 6. Repli PocketWorld
-    console.warn('[flights] Aucune source ADS-B native n\'a répondu → repli PocketWorld');
-    try { return await fetchPocketWorldFlights(); }
-    catch (e) { console.warn('[flights] ✗ ' + e.message); return []; }
-}
-
-async function fetchPocketWorldFlights() {
-    const j = await fetchViaProxies(`${POCKETWORLD}/flights?wire=1&bbox=${BBOX_FRANCE}`);
-    const fields = j.flight_fields || [];
-    const rows = j.flight_rows || [];
-    state.lastSource = 'PocketWorld (proxy)';
-    state.lastStats = { PocketWorld: rows.length };
-    console.log('[flights] ✓ ' + rows.length + ' aéronefs (' + (j.total || 0) + ' total) via PocketWorld');
-    return rows.map(row => {
-        const a = {};
-        fields.forEach((f, i) => a[f] = row[i]);
-        return {
-            icao24: a.icao24,
-            callsign: (a.callsign || a.icao24 || '').trim() || '—',
-            lat: a.lat, lon: a.lng,
-            alt: typeof a.alt === 'number' ? Math.round(a.alt) : null,
-            vel: typeof a.velocity === 'number' ? Math.round(a.velocity * 1.852) : null,
-            country: a.country || '—',
-            typecode: a.typecode || '—',
-            registration: a.registration || '',
-            category: a.category || '—',
-            transportKind: a.transport_kind || '—',
-            military: false
-        };
-    }).filter(f => f.lat != null && f.lon != null);
+    console.warn('[flights] Aucune source ADS-B → repli PocketWorld');
+    try {
+        const res = await fetchPocketWorldFlights();
+        state.lastSource = 'PocketWorld (cors.lol)';
+        return res;
+    } catch (e) {
+        console.warn('[flights] ✗ ' + e.message);
+        return [];
+    }
 }
 
 async function fetchEarthquakes() {
@@ -1030,17 +1020,7 @@ async function refreshAll() {
     const now = new Date().toLocaleTimeString('fr-FR');
     document.getElementById('lastUpdate').textContent = now;
     document.getElementById('radarLastUpdate').textContent = 'MAJ : ' + now;
-
-    // Affiche les stats de fusion dans le footer du radar
-    let srcLabel = state.lastSource || '—';
-    if (state.lastStats && Object.keys(state.lastStats).length > 1) {
-        srcLabel += ' — ' + Object.entries(state.lastStats)
-            .map(([k, v]) => `${k}: ${v}`).join(' · ');
-    } else if (state.lastStats) {
-        const [k, v] = Object.entries(state.lastStats)[0];
-        srcLabel += ' — ' + v + ' aéronefs';
-    }
-    document.getElementById('radarSource').textContent = 'Source : ' + srcLabel;
+    document.getElementById('radarSource').textContent = 'Source : ' + (state.lastSource || '—');
     document.getElementById('radarTargetCount').textContent = flights.length;
 }
 
@@ -1061,12 +1041,6 @@ function updateKPIs() {
     document.getElementById('kpiFlights').textContent = flights.length + military.length;
     document.getElementById('kpiMil').textContent = military.length;
     document.getElementById('kpiMilTrend').textContent = military.length > 0 ? 'Types détectés' : 'Aucun';
-
-    // Trend de couverture par source
-    if (state.lastStats && Object.keys(state.lastStats).length > 1) {
-        document.getElementById('kpiFlightsTrend').textContent =
-            Object.entries(state.lastStats).map(([k, v]) => `${k} : ${v}`).join(' · ');
-    }
 
     const allAir = [...flights, ...military];
     const withAlt = allAir.filter(f => f.alt != null);
@@ -1092,7 +1066,7 @@ function updateKPIs() {
 }
 
 /* ============================================================
-   CHARTS
+   GRAPHIQUES
    ============================================================ */
 function updateCharts() {
     const allAir = [...state.data.flights, ...state.data.military];
@@ -1160,7 +1134,7 @@ function chartOpts() {
 }
 
 /* ============================================================
-   TABLE
+   TABLEAU
    ============================================================ */
 function updateTable() {
     if (state.geoFilter.active) return applyGeoFilter();
@@ -1253,13 +1227,11 @@ function showAbout() {
         non édité, non approuvé et non affilié à l'État français ou à l'Armée de l'Air.</p>
         <p style="margin-top:0.75rem;">Il agrège uniquement des <strong>données ADS-B publiques</strong> :</p>
         <ul style="margin:0.75rem 0 0 1.25rem;">
-            <li><strong>adsb.lol</strong> + <strong>adsb.fi</strong> — <em>fusion parallèle</em> (CORS natif, sans proxy)</li>
-            <li><strong>PocketWorld</strong> — repli via proxys CORS</li>
-            <li><strong>USGS</strong> — séismes M ≥ 2.5 des dernières 24 h</li>
+            <li><strong>adsb.lol</strong> + <strong>adsb.fi</strong> — via le proxy <strong>cors.lol</strong></li>
+            <li><strong>PocketWorld</strong> — repli via le même proxy</li>
+            <li><strong>USGS</strong> — séismes M ≥ 2.5 des dernières 24 h (CORS natif)</li>
         </ul>
         <p style="margin-top:0.75rem;font-size:0.8rem;color:var(--text-mention);">
-            <strong>Fusion :</strong> les deux sources ADS-B sont interrogées en parallèle puis dédoublonnées
-            par code ICAO24, ce qui maximise le nombre d'aéronefs visibles (chaque réseau a ses propres récepteurs bénévoles).
             Code source : MIT © 2026.
         </p>`;
     document.getElementById('detailModal').classList.add('active');
@@ -1272,7 +1244,7 @@ document.getElementById('detailModal').addEventListener('click', e => {
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
 /* ============================================================
-   MAP MARKERS
+   MARQUEURS CARTE
    ============================================================ */
 function updateMapMarkers() {
     if (!state.map) return;
@@ -1424,6 +1396,22 @@ function exportPDF() {
 }
 
 /* ============================================================
+   NAVIGATION
+   ============================================================ */
+document.querySelectorAll('.fr-nav__link').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.fr-nav__link').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const targets = { overview: null, radar: 'radarAnchor', map: 'mapAnchor' };
+        const id = targets[btn.dataset.tab];
+        if (id) {
+            const el = document.getElementById(id);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+});
+
+/* ============================================================
    UTILITAIRES
    ============================================================ */
 function escapeHtml(s) {
@@ -1431,6 +1419,11 @@ function escapeHtml(s) {
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+
+window.addEventListener('beforeunload', () => {
+    if (state.radar.animationId) cancelAnimationFrame(state.radar.animationId);
+    if (state.updateInterval) clearInterval(state.updateInterval);
+});
 </script>
 </body>
 </html>
