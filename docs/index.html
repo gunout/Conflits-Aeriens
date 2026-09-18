@@ -358,12 +358,12 @@ main { padding: 1.5rem 0 3rem; }
         <div class="fr-kpi fr-kpi--success">
             <div class="fr-kpi__label"><i class="fas fa-plane"></i> Aéronefs détectés</div>
             <div class="fr-kpi__value" id="kpiFlights">—</div>
-            <span class="fr-kpi__trend" id="kpiFlightsTrend">PocketWorld + repli</span>
+            <span class="fr-kpi__trend" id="kpiFlightsTrend">OpenSky Network (direct)</span>
         </div>
         <div class="fr-kpi fr-kpi--warning">
             <div class="fr-kpi__label"><i class="fas fa-fighter-jet"></i> Militaires probables</div>
             <div class="fr-kpi__value" id="kpiMil">—</div>
-            <span class="fr-kpi__trend" id="kpiMilTrend">Détection par type</span>
+            <span class="fr-kpi__trend" id="kpiMilTrend">Détection par indicatif</span>
         </div>
         <div class="fr-kpi">
             <div class="fr-kpi__label"><i class="fas fa-arrow-up"></i> Altitude max</div>
@@ -455,10 +455,10 @@ main { padding: 1.5rem 0 3rem; }
                     <thead>
                         <tr>
                             <th onclick="sortTable(0)">Indicatif ↕</th>
-                            <th onclick="sortTable(1)">Type ↕</th>
+                            <th onclick="sortTable(1)">Pays ↕</th>
                             <th onclick="sortTable(2)">Altitude ↕</th>
                             <th onclick="sortTable(3)">Vitesse ↕</th>
-                            <th onclick="sortTable(4)">Catégorie ↕</th>
+                            <th onclick="sortTable(4)">Statut ↕</th>
                         </tr>
                     </thead>
                     <tbody id="eventsBody">
@@ -484,7 +484,7 @@ main { padding: 1.5rem 0 3rem; }
                 <div style="font-size:0.75rem;font-weight:400;color:var(--text-mention);">Outil tiers indépendant — non gouvernemental</div>
             </div>
         </div>
-        <div>Hébergement : GitHub Pages · Sources : PocketWorld + adsb.fi · Séismes : USGS · © 2026 MIT</div>
+        <div>Hébergement : GitHub Pages · Source : OpenSky Network (direct) · Séismes : USGS · © 2026 MIT</div>
     </div>
 </footer>
 
@@ -503,20 +503,17 @@ main { padding: 1.5rem 0 3rem; }
 
 /* ============================================================
    CONFIGURATION
+   OpenSky : CORS ouvert, appel direct sans proxy (testé ✅)
+   USGS   : CORS ouvert, appel direct
    ============================================================ */
-const FR_BBOX = '-5.5,41,9.8,51.5';
-const FR_CENTER = { lat: 47.0, lon: 2.4, dist: 250 };
+const OPENSKY_URL = 'https://opensky-network.org/api/states/all?lamin=41&lomin=-5.5&lamax=51.5&lomax=9.8';
+const USGS_URL = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson';
 
-const CATEGORY_FR = {
-    A1: 'Léger', A2: 'Petit', A3: 'Liner', A4: 'Gros', A5: 'Lourd', A6: 'Super',
-    A7: 'Hélico', A8: 'Gyrocoptère', A9: 'Ultra-léger',
-    B1: 'Ballon', B2: 'Dirigeable', C1: 'Planeur'
-};
-const ftToM = v => (typeof v === 'number' ? Math.round(v * 0.3048) : null);
+const FR_BBOX = { latMin: 41.0, latMax: 51.5, lonMin: -5.5, lonMax: 9.8 };
 
-/* ============================================================
-   ÉTAT GLOBAL
-   ============================================================ */
+/* Fréquence de rafraîchissement : 5 min (OpenSky rate-limite les IP anonymes à ~400 crédits/jour) */
+const REFRESH_MS = 5 * 60 * 1000;
+
 const state = {
     charts: { alt: null, speed: null, quakes: null },
     data: { flights: [], military: [], quakes: [] },
@@ -531,25 +528,23 @@ const state = {
     radar: {
         canvas: null, ctx: null, animationId: null,
         sweepAngle: 0, paused: false,
-        rangeNM: 250, rangeOptions: [100, 250, 400, 600], rangeIndex: 1,
+        rangeNM: 250, rangeOptions: [100, 250, 400, 500], rangeIndex: 1,
         showLabels: false,
         center: { lat: 48.85, lon: 2.35 }
     }
 };
 
 /* ============================================================
-   DÉTECTION MILITAIRE
+   DÉTECTION MILITAIRE (basée sur les indicatifs)
+   OpenSky ne fournit pas de typecode → on filtre sur le callsign
    ============================================================ */
-const MILITARY_TYPECODES = new Set([
-    'C17', 'C5M', 'C130', 'C30J', 'KC135', 'K35R', 'KC10', 'KC46',
-    'P8', 'P3', 'E3TF', 'E3CF', 'E3AP', 'E8', 'RC135', 'U2', 'RQ4', 'MQ9',
-    'A400', 'A4OO', 'C160', 'C27J', 'C295', 'CN35',
-    'F16', 'F15', 'F18', 'F22', 'F35', 'EF2000', 'RAFA', 'MIRA',
-    'MIG29', 'SU27', 'SU30', 'SU34', 'SU35', 'T50',
-    'B52', 'B1', 'B2',
-    'V22', 'CH47', 'UH60', 'AH64', 'NH90', 'EH10', 'H160', 'AS565'
-]);
-const MILITARY_REG_PREFIXES = ['FR', 'FU', 'FM'];
+const MILITARY_CALLSIGN_PREFIXES = [
+    'RCH', 'REACH', 'DUKE', 'HAWK', 'HUNTER', 'KILLER', 'LUCKY',
+    'GAMBLER', 'BOOKIE', 'TIGER', 'POUNCE', 'BENGAL',
+    'FAF', 'FRAF', 'COTAM',
+    'NATO', 'AWACS', 'MAGIC', 'SENTRY',
+    'CFC', 'ASCOT', 'RRR', 'GAF', 'IAM', 'PLF', 'BAF', 'NAF'
+];
 
 function isUsMilitaryHex(hex) {
     const h = (hex || '').replace('~', '').toUpperCase();
@@ -557,122 +552,61 @@ function isUsMilitaryHex(hex) {
 }
 
 function isMilitary(a) {
-    if (a.military) return true;
     if (isUsMilitaryHex(a.icao24)) return true;
-    const tc = (a.typecode || '').toUpperCase();
-    if (MILITARY_TYPECODES.has(tc)) return true;
-    const reg = (a.registration || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (reg && reg.length <= 7 && MILITARY_REG_PREFIXES.some(p => reg.startsWith(p))) return true;
-    const cat = (a.category || '').toLowerCase();
-    return cat.includes('mil');
+    const cs = (a.callsign || '').toUpperCase().trim();
+    if (!cs || cs === '—') return false;
+    return MILITARY_CALLSIGN_PREFIXES.some(p => cs.startsWith(p));
 }
 
 /* ============================================================
    FETCH générique avec timeout
    ============================================================ */
-async function fetchJSON(url, timeoutMs = 12000) {
+async function fetchJSON(url, timeoutMs = 15000) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
         const r = await fetch(url, { signal: ctrl.signal });
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        const text = (await r.text()).trim();
-        if (!text.startsWith('{') && !text.startsWith('[')) throw new Error('Réponse non-JSON');
-        return JSON.parse(text);
+        return await r.json();
     } finally { clearTimeout(timer); }
 }
 
 /* ============================================================
-   FETCH AÉRONEFS — 3 sources en cascade
-   1) PocketWorld direct (peut échouer sur CORS)
-   2) PocketWorld via cors.lol (fallback)
-   3) adsb.fi direct (fallback)
+   FETCH AÉRONEFS — OpenSky direct
+   Format OpenSky : states[i] = [icao24, callsign, country, time_pos,
+     last_contact, lon, lat, baro_alt, on_ground, velocity, true_track,
+     vert_rate, sensors, geo_alt, squawk, spi, position_source]
    ============================================================ */
-function parsePocketWorld(j) {
-    const fields = j.flight_fields || [];
-    const rows = j.flight_rows || [];
-    return rows.map(row => {
-        const a = {};
-        fields.forEach((f, i) => a[f] = row[i]);
-        return {
-            icao24: (a.icao24 || '').toLowerCase(),
-            callsign: (a.callsign || a.icao24 || '').trim() || '—',
-            lat: a.lat, lon: a.lng,
-            alt: typeof a.alt === 'number' ? Math.round(a.alt) : null,
-            vel: typeof a.velocity === 'number' ? Math.round(a.velocity * 1.852) : null,
-            country: a.country || '—',
-            typecode: a.typecode || '—',
-            registration: a.registration || '',
-            category: a.category || '—',
-            transportKind: a.transport_kind || '—',
-            military: false
-        };
-    }).filter(f => f.lat != null && f.lon != null);
-}
-
 async function fetchFlights() {
-    // 1. PocketWorld direct
+    console.log('[flights] OpenSky Network (direct)…');
     try {
-        console.log('[flights] PocketWorld (direct)…');
-        const url = `https://pocketworld.org/api/flights?wire=1&bbox=${FR_BBOX}`;
-        const j = await fetchJSON(url, 8000);
-        const flights = parsePocketWorld(j);
-        if (flights.length > 0) {
-            state.lastSource = 'PocketWorld (direct)';
-            console.log(`[flights] ✓ ${flights.length} via PocketWorld direct`);
-            return flights;
-        }
+        const j = await fetchJSON(OPENSKY_URL);
+        const states = j.states || [];
+        console.log(`[flights] ✓ ${states.length} aéronefs bruts reçus`);
+
+        const flights = states.map(s => ({
+            icao24: (s[0] || '').toLowerCase(),
+            callsign: (s[1] || s[0] || '').trim() || '—',
+            lon: s[5],
+            lat: s[6],
+            alt: typeof s[7] === 'number' ? Math.round(s[7]) : (typeof s[13] === 'number' ? Math.round(s[13]) : null),
+            vel: typeof s[9] === 'number' ? Math.round(s[9] * 3.6) : null, // m/s → km/h
+            country: s[2] || '—',
+            typecode: '—',
+            registration: '',
+            category: s[8] ? 'Au sol' : 'En vol',
+            transportKind: 'opensky',
+            military: false,
+            onGround: !!s[8]
+        })).filter(f => f.lat != null && f.lon != null && !f.onGround);
+
+        state.lastSource = 'OpenSky Network (direct)';
+        console.log(`[flights] ✓ ${flights.length} aéronefs en vol`);
+        return flights;
     } catch (e) {
-        console.warn(`[flights] ✗ PocketWorld direct : ${e.message}`);
+        console.warn(`[flights] ✗ OpenSky : ${e.message}`);
+        return [];
     }
-
-    // 2. PocketWorld via cors.lol
-    try {
-        console.log('[flights] PocketWorld via cors.lol…');
-        const target = `https://pocketworld.org/api/flights?wire=1&bbox=${FR_BBOX}`;
-        const url = 'https://api.cors.lol/?url=' + encodeURIComponent(target);
-        const j = await fetchJSON(url, 8000);
-        const flights = parsePocketWorld(j);
-        if (flights.length > 0) {
-            state.lastSource = 'PocketWorld (cors.lol)';
-            console.log(`[flights] ✓ ${flights.length} via cors.lol`);
-            return flights;
-        }
-    } catch (e) {
-        console.warn(`[flights] ✗ cors.lol : ${e.message}`);
-    }
-
-    // 3. adsb.fi direct
-    try {
-        console.log('[flights] adsb.fi (direct)…');
-        const url = `https://opendata.adsb.fi/api/v3/lat/${FR_CENTER.lat}/lon/${FR_CENTER.lon}/dist/${FR_CENTER.dist}`;
-        const j = await fetchJSON(url, 8000);
-        const acs = j.ac || [];
-        const flights = acs.map(ac => ({
-            icao24: (ac.hex || '').replace('~', '').trim().toLowerCase(),
-            callsign: (ac.flight || ac.hex || '').trim() || '—',
-            lat: ac.lat, lon: ac.lon,
-            alt: ftToM(ac.alt_baro) ?? ftToM(ac.alt_geom),
-            vel: typeof ac.gs === 'number' ? Math.round(ac.gs * 1.852) : null,
-            country: ac.t || '—',
-            typecode: ac.t || '—',
-            registration: ac.r || '',
-            category: CATEGORY_FR[ac.category] || ac.category || '—',
-            transportKind: 'adsb.fi',
-            military: !!((ac.dbFlags || 0) & 1)
-        })).filter(f => f.lat != null && f.lon != null);
-
-        if (flights.length > 0) {
-            state.lastSource = 'adsb.fi (direct)';
-            console.log(`[flights] ✓ ${flights.length} via adsb.fi`);
-            return flights;
-        }
-    } catch (e) {
-        console.warn(`[flights] ✗ adsb.fi : ${e.message}`);
-    }
-
-    console.warn('[flights] ✗ Toutes les sources ont échoué');
-    return [];
 }
 
 /* ============================================================
@@ -680,7 +614,7 @@ async function fetchFlights() {
    ============================================================ */
 async function fetchEarthquakes() {
     try {
-        const j = await fetchJSON('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson');
+        const j = await fetchJSON(USGS_URL);
         console.log('[USGS] ✓ ' + j.features.length + ' séismes');
         return (j.features || []).map(f => ({
             id: f.id, time: new Date(f.properties.time),
@@ -701,7 +635,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initRadar();
     initMap();
     refreshAll();
-    state.updateInterval = setInterval(refreshAll, 60000);
+    state.updateInterval = setInterval(refreshAll, REFRESH_MS);
 });
 
 /* ============================================================
@@ -714,7 +648,6 @@ async function refreshAll() {
         fetchFlights(), fetchEarthquakes()
     ]);
 
-    // Conserver les données précédentes si la nouvelle requête échoue
     const previousAir = [...(state.data.flights || []), ...(state.data.military || [])];
     const flights = newFlights.length > 0 ? newFlights : previousAir;
     const quakes = newQuakes.length > 0 ? newQuakes : (state.data.quakes || []);
@@ -1104,10 +1037,10 @@ function renderTable(rows) {
     tbody.innerHTML = rows.slice(0, 100).map((r, i) => `
         <tr onclick="showDetail(${i})">
             <td><strong>${escapeHtml(r.callsign)}</strong></td>
-            <td>${escapeHtml(r.typecode)}</td>
+            <td>${escapeHtml(r.country || '—')}</td>
             <td>${r.alt != null ? r.alt.toLocaleString('fr-FR') + ' m' : '—'}</td>
             <td>${r.vel != null ? r.vel.toLocaleString('fr-FR') + ' km/h' : '—'}</td>
-            <td>${r.military ? '<span class="fr-tag fr-tag--mil">MIL</span>' : '<span class="fr-tag fr-tag--info">' + escapeHtml(r.category) + '</span>'}</td>
+            <td>${r.military ? '<span class="fr-tag fr-tag--mil">MIL</span>' : '<span class="fr-tag fr-tag--info">CIV</span>'}</td>
         </tr>
     `).join('');
     document.getElementById('tableCount').textContent = rows.length + ' contact' + (rows.length > 1 ? 's' : '');
@@ -1117,12 +1050,12 @@ function filterTable() {
     const q = document.getElementById('tableSearch').value.trim().toLowerCase();
     if (!q) return renderTable(state.tableRows);
     renderTable(state.tableRows.filter(r =>
-        (r.callsign + ' ' + r.typecode + ' ' + r.category).toLowerCase().includes(q)
+        (r.callsign + ' ' + r.country).toLowerCase().includes(q)
     ));
 }
 
 function sortTable(col) {
-    const keys = ['callsign', 'typecode', 'alt', 'vel', 'category'];
+    const keys = ['callsign', 'country', 'alt', 'vel', 'military'];
     const key = keys[col];
     state.sortDir[col] = !state.sortDir[col];
     const dir = state.sortDir[col] ? 1 : -1;
@@ -1131,6 +1064,7 @@ function sortTable(col) {
         if (av == null) return 1;
         if (bv == null) return -1;
         if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+        if (typeof av === 'boolean' && typeof bv === 'boolean') return (av === bv ? 0 : (av ? -1 : 1)) * dir;
         return String(av).localeCompare(String(bv)) * dir;
     });
     renderTable(sorted);
@@ -1145,11 +1079,10 @@ function showDetail(i) {
     document.getElementById('modalTitle').textContent = (r.military ? '⚔ ' : '✈ ') + r.callsign;
     document.getElementById('modalBody').innerHTML = `
         <table class="fr-table"><tbody>
-            <tr><td><strong>Type</strong></td><td>${escapeHtml(r.typecode)}</td></tr>
-            <tr><td><strong>Immatriculation</strong></td><td>${escapeHtml(r.registration || '—')}</td></tr>
-            <tr><td><strong>Catégorie</strong></td><td>${r.military
+            <tr><td><strong>Pays d'origine</strong></td><td>${escapeHtml(r.country || '—')}</td></tr>
+            <tr><td><strong>Statut</strong></td><td>${r.military
                 ? '<span class="fr-tag fr-tag--mil">MILITAIRE (probable)</span>'
-                : '<span class="fr-tag fr-tag--info">' + escapeHtml(r.category) + '</span>'}</td></tr>
+                : '<span class="fr-tag fr-tag--info">CIVIL</span>'}</td></tr>
             <tr><td><strong>Altitude</strong></td><td>${r.alt != null ? r.alt.toLocaleString('fr-FR') + ' m' : '—'}</td></tr>
             <tr><td><strong>Vitesse</strong></td><td>${r.vel != null ? r.vel.toLocaleString('fr-FR') + ' km/h' : '—'}</td></tr>
             <tr><td><strong>Position</strong></td><td>${r.lat != null ? r.lat.toFixed(3) + '°, ' + r.lon.toFixed(3) + '°' : '—'}</td></tr>
@@ -1157,8 +1090,8 @@ function showDetail(i) {
         </tbody></table>
         <p style="font-size:0.75rem;color:var(--text-mention);margin-top:1rem;">
             <i class="fas fa-circle-info"></i>
-            Données ADS-B publiques transmises par l'aéronef. La classification « militaire »
-            est probabiliste (base readsb, code type, immatriculation) et non officielle.
+            Données ADS-B publiques OpenSky. La classification « militaire » est basée sur
+            l'indicatif et le bloc ICAO24 — elle est indicative et non officielle.
         </p>`;
     document.getElementById('detailModal').classList.add('active');
 }
@@ -1170,12 +1103,11 @@ function showAbout() {
         non édité, non approuvé et non affilié à l'État français ou à l'Armée de l'Air.</p>
         <p style="margin-top:0.75rem;">Il agrège uniquement des <strong>données ADS-B publiques</strong> :</p>
         <ul style="margin:0.75rem 0 0 1.25rem;">
-            <li><strong>PocketWorld</strong> — source principale (direct ou cors.lol)</li>
-            <li><strong>adsb.fi</strong> — source de secours</li>
+            <li><strong>OpenSky Network</strong> — positions ADS-B (CORS ouvert)</li>
             <li><strong>USGS</strong> — séismes M ≥ 2.5 des dernières 24 h</li>
         </ul>
         <p style="margin-top:0.75rem;font-size:0.8rem;color:var(--text-mention);">
-            En cas d'échec des sources, les dernières données valides sont conservées en cache.
+            Fréquence de rafraîchissement : 5 minutes (limite OpenSky anonyme).
             Code source : MIT © 2026.
         </p>`;
     document.getElementById('detailModal').classList.add('active');
@@ -1200,7 +1132,7 @@ function updateMapMarkers() {
         const m = L.circleMarker([f.lat, f.lon], {
             radius: 3, color, fillColor: color, fillOpacity: 0.7, weight: 1
         }).addTo(state.map);
-        m.bindPopup(`<strong style="color:${color};">${f.military ? '⚔' : '✈'} ${escapeHtml(f.callsign)}</strong><br>${escapeHtml(f.typecode)}<br>Alt : ${f.alt != null ? f.alt + ' m' : '—'}`);
+        m.bindPopup(`<strong style="color:${color};">${f.military ? '⚔' : '✈'} ${escapeHtml(f.callsign)}</strong><br>${escapeHtml(f.country || '—')}<br>Alt : ${f.alt != null ? f.alt + ' m' : '—'}`);
         state._markers.push(m);
     });
 }
@@ -1210,10 +1142,10 @@ function updateMapMarkers() {
    ============================================================ */
 function exportCSV() {
     const allAir = [...state.data.military, ...state.data.flights];
-    const headers = ['Type', 'Indicatif', 'Code type', 'Immat.', 'Catégorie', 'Latitude', 'Longitude', 'Altitude (m)', 'Vitesse (km/h)'];
+    const headers = ['Type', 'Indicatif', 'Pays', 'Latitude', 'Longitude', 'Altitude (m)', 'Vitesse (km/h)'];
     const rows = allAir.map(f => [
         f.military ? 'MILITAIRE' : 'CIVIL',
-        f.callsign, f.typecode, f.registration || '', f.category || f.transportKind || '',
+        f.callsign, f.country || '',
         f.lat != null ? f.lat.toFixed(4) : '',
         f.lon != null ? f.lon.toFixed(4) : '',
         f.alt != null ? f.alt : '',
@@ -1225,7 +1157,7 @@ function exportCSV() {
     };
     const lines = [
         '# RAPPORT RADAR AÉRIEN — ' + new Date().toLocaleString('fr-FR'),
-        '# Outil tiers non gouvernemental — données ADS-B publiques',
+        '# Outil tiers non gouvernemental — données ADS-B publiques (OpenSky)',
         '',
         '## AÉRONEFS (' + allAir.length + ')',
         headers.join(','),
@@ -1292,9 +1224,9 @@ function exportPDF() {
         y += 4;
         doc.autoTable({
             startY: y,
-            head: [['Indicatif', 'Type', 'Catégorie', 'Altitude', 'Vitesse']],
+            head: [['Indicatif', 'Statut', 'Pays', 'Altitude', 'Vitesse']],
             body: allAir.slice(0, 25).map(f => [
-                f.callsign, f.typecode, f.military ? 'MIL' : (f.category || '-'),
+                f.callsign, f.military ? 'MIL' : 'CIV', f.country || '-',
                 f.alt != null ? nf(f.alt) + ' m' : '-',
                 f.vel != null ? nf(f.vel) + ' km/h' : '-'
             ]),
