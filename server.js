@@ -1,30 +1,37 @@
-// server.js
+// server.js — Backend WebSocket pour Radar Aérien France
 import express from 'express';
 import http from 'http';
 import { Server as SocketIO } from 'socket.io';
 import NodeCache from 'node-cache';
 import cors from 'cors';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
 
-// CORS : autoriser GitHub Pages + localhost + Render
+/* ============================================================
+   CORS — Autorise GitHub Pages + localhost
+   ⚠️ Remplacez VOTRE-USER par votre pseudo GitHub
+   ============================================================ */
+const ALLOWED_ORIGINS = [
+    'https://VOTRE-USER.github.io',
+    'http://localhost:3000',
+    'http://localhost:5500',
+    'http://127.0.0.1:5500'
+];
+
 const io = new SocketIO(server, {
     cors: {
-        origin: '*', // À restreindre en production
-        methods: ['GET', 'POST']
-    }
+        origin: ALLOWED_ORIGINS,
+        methods: ['GET', 'POST'],
+        credentials: false
+    },
+    transports: ['websocket', 'polling']
 });
 
-const cache = new NodeCache({ stdTTL: 60, checkperiod: 30 });
+app.use(cors({ origin: ALLOWED_ORIGINS }));
+app.use(express.json());
 
-app.use(cors());
-app.use(express.static(path.join(__dirname, 'public')));
+const cache = new NodeCache({ stdTTL: 60, checkperiod: 30 });
 
 /* ============================================================
    HELPERS
@@ -41,7 +48,7 @@ async function cachedFetch(url, ttl = 60) {
         cache.set(key, data, ttl);
         return data;
     } catch (e) {
-        console.error('[fetch]', url.slice(0, 60), '→', e.message);
+        console.error('[fetch]', url.slice(0, 70), '→', e.message);
         return null;
     }
 }
@@ -60,7 +67,7 @@ function normalizeAircraft(a, military = false) {
 }
 
 /* ============================================================
-   AGRÉGATION
+   AGRÉGATION DES SOURCES
    ============================================================ */
 async function collectAllData() {
     const [civils, military, quakesRaw, newsRaw] = await Promise.all([
@@ -103,21 +110,23 @@ async function collectAllData() {
         military: militaryFlights,
         quakes,
         news,
-        notams: [],   // Placeholder — PocketWorld peut être ajouté
-        conflicts: [] // Calculé côté client pour l'instant
+        notams: [],
+        conflicts: []
     };
 }
 
 /* ============================================================
-   WEBSOCKET
+   WEBSOCKET — Diffusion périodique
    ============================================================ */
 let broadcaster = null;
 
 io.on('connection', (socket) => {
-    console.log('[WS] Client connecté :', socket.id);
+    console.log('[WS] ✅ Client :', socket.id, '| Total :', io.engine.clientsCount);
 
+    // Envoi immédiat des données au nouveau client
     collectAllData().then(data => socket.emit('data-update', data));
 
+    // Démarrage du broadcast global (une seule fois)
     if (!broadcaster) {
         broadcaster = setInterval(async () => {
             try {
@@ -125,24 +134,39 @@ io.on('connection', (socket) => {
                 io.emit('data-update', data);
                 console.log(`[WS] Diffusion : ${data.flights.length} civils, ${data.military.length} mil, ${data.quakes.length} séismes`);
             } catch (e) {
-                console.error('[WS] Erreur diffusion :', e.message);
+                console.error('[WS] Erreur :', e.message);
             }
         }, 15000);
+        console.log('[WS] Broadcast démarré (15s)');
     }
 
     socket.on('disconnect', () => {
-        console.log('[WS] Client déconnecté :', socket.id);
+        console.log('[WS] ❌ Déconnexion :', socket.id, '| Restants :', io.engine.clientsCount);
     });
 });
 
 /* ============================================================
    ENDPOINTS REST
    ============================================================ */
+app.get('/', (req, res) => {
+    res.json({
+        name: 'Radar Aérien France — Backend',
+        status: 'ok',
+        version: '1.0.0',
+        endpoints: {
+            health: '/api/health',
+            all: '/api/all',
+            websocket: '/socket.io/'
+        }
+    });
+});
+
 app.get('/api/health', (req, res) => res.json({
     status: 'ok',
     clients: io.engine.clientsCount,
     cached: cache.keys().length,
-    uptime: Math.round(process.uptime()) + 's'
+    uptime: Math.round(process.uptime()) + 's',
+    timestamp: new Date().toISOString()
 }));
 
 app.get('/api/all', async (req, res) => {
@@ -150,9 +174,14 @@ app.get('/api/all', async (req, res) => {
     res.json(data);
 });
 
+/* ============================================================
+   DÉMARRAGE
+   ============================================================ */
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`✅ Radar Aérien France démarré sur http://localhost:${PORT}`);
-    console.log(`   WebSocket : ws://localhost:${PORT}`);
+    console.log(`✅ Radar Aérien Backend démarré`);
+    console.log(`   Port      : ${PORT}`);
+    console.log(`   WebSocket : ws://localhost:${PORT}/socket.io/`);
     console.log(`   Health    : http://localhost:${PORT}/api/health`);
+    console.log(`   CORS      : ${ALLOWED_ORIGINS.join(', ')}`);
 });
