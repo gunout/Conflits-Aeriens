@@ -49,6 +49,7 @@ body {
 
 .fr-header { background: var(--white); border-bottom: 1px solid var(--border); }
 .fr-header__top { background: var(--blue-france); color: var(--white); padding: 6px 0; font-size: 0.75rem; text-align: center; }
+.fr-header__top a { color: var(--white); text-decoration: underline; }
 .fr-header__main { display: flex; align-items: center; justify-content: space-between; padding: 1rem 0; gap: 1rem; flex-wrap: wrap; }
 .fr-header__brand { display: flex; align-items: center; gap: 0.75rem; text-decoration: none; color: var(--text-title); }
 .fr-header__brand-logo {
@@ -510,11 +511,62 @@ main { padding: 1.5rem 0 3rem; }
 <script>
 'use strict';
 
-// ============================================================
-// Proxy CORS — toutes les requêtes passent par ici
-// ============================================================
-const PROXY = 'https://api.cors.lol/?url=';
-const proxied = (url) => PROXY + encodeURIComponent(url);
+/* ============================================================
+   CASCADE DE PROXYS CORS — Fallback automatique
+   Le premier qui répond gagne, les autres servent de secours.
+   ============================================================ */
+const CORS_PROXIES = [
+    // 1. codetabs — le plus fiable actuellement
+    (url) => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
+    // 2. corsproxy.io — connu et stable
+    (url) => 'https://corsproxy.io/?url=' + encodeURIComponent(url),
+    // 3. allorigins
+    (url) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+    // 4. thingproxy
+    (url) => 'https://thingproxy.freeboard.io/fetch/' + url,
+    // 5. cors.lol — en dernier (souvent rate-limité)
+    (url) => 'https://api.cors.lol/?url=' + encodeURIComponent(url)
+];
+
+/**
+ * Fetch avec cascade : essaie chaque proxy jusqu'à succès.
+ */
+async function fetchJSON(targetUrl) {
+    let lastError = null;
+
+    for (let i = 0; i < CORS_PROXIES.length; i++) {
+        const proxyUrl = CORS_PROXIES[i](targetUrl);
+        let proxyName = 'inconnu';
+        try { proxyName = new URL(proxyUrl).hostname; } catch (e) {}
+
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+
+            const r = await fetch(proxyUrl, { signal: controller.signal });
+            clearTimeout(timeout);
+
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+
+            const text = await r.text();
+            const trimmed = text.trim();
+            if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+                throw new Error('Réponse non-JSON');
+            }
+
+            const data = JSON.parse(trimmed);
+            console.log(`[proxy] ✓ ${proxyName} → ${targetUrl.slice(0, 55)}…`);
+            return data;
+
+        } catch (e) {
+            lastError = e;
+            console.warn(`[proxy] ✗ ${proxyName} → ${e.message}`);
+        }
+    }
+
+    console.error(`[proxy] ✗ Tous les proxys ont échoué pour ${targetUrl.slice(0, 60)}…`);
+    throw lastError || new Error('Aucun proxy disponible');
+}
 
 const state = {
     charts: { alt: null, speed: null, quakes: null },
@@ -541,9 +593,9 @@ document.addEventListener('DOMContentLoaded', () => {
     state.updateInterval = setInterval(refreshAll, 30000);
 });
 
-// ============================================================
-// RADAR
-// ============================================================
+/* ============================================================
+   RADAR
+   ============================================================ */
 function initRadar() {
     const canvas = document.getElementById('radarCanvas');
     if (!canvas) return;
@@ -674,9 +726,9 @@ function cycleRadarRange() {
 }
 function toggleRadarLabels() { state.radar.showLabels = !state.radar.showLabels; }
 
-// ============================================================
-// MAP
-// ============================================================
+/* ============================================================
+   MAP
+   ============================================================ */
 function initMap() {
     state.map = L.map('map').setView([46.6, 2.5], 5);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -745,26 +797,19 @@ function applyGeoFilter() {
         (bounds ? ' (zone filtrée)' : '');
 }
 
-// ============================================================
-// FETCH — Toutes les APIs via cors.lol
-// ============================================================
-async function fetchJSON(url) {
-    const r = await fetch(proxied(url));
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const text = await r.text();
-    if (!text.trim().startsWith('{')) throw new Error('Non-JSON');
-    return JSON.parse(text);
-}
-
+/* ============================================================
+   FETCH — via cascade de proxys
+   ============================================================ */
 async function fetchFlights() {
     const targets = [
         'https://api.adsb.lol/v2/point/48.85/2.35/250',
-        'https://opendata.adsb.fi/api/v2/point/48.85/2.35/250'
+        'https://opendata.adsb.fi/api/v2/point/48.85/2.35/250',
+        'https://api.airplanes.live/v2/point/48.85/2.35/250'
     ];
     for (const url of targets) {
         try {
             const j = await fetchJSON(url);
-            if (!j.ac) throw new Error('Format');
+            if (!j.ac || !Array.isArray(j.ac)) throw new Error('Format inattendu');
             console.log('[flights] ✓ ' + new URL(url).hostname + ' (' + j.ac.length + ')');
             return j.ac.map(a => ({
                 icao24: a.hex,
@@ -775,7 +820,9 @@ async function fetchFlights() {
                 country: a.t || a.r || '—',
                 military: false
             })).filter(f => f.lat != null && f.lon != null);
-        } catch (e) { console.warn('[flights] ✗', new URL(url).hostname, e.message); }
+        } catch (e) {
+            console.warn('[flights] ✗ ' + new URL(url).hostname + ' → ' + e.message);
+        }
     }
     return [];
 }
@@ -788,7 +835,7 @@ async function fetchMilitaryFlights() {
     for (const url of targets) {
         try {
             const j = await fetchJSON(url);
-            if (!j.ac) throw new Error('Format');
+            if (!j.ac || !Array.isArray(j.ac)) throw new Error('Format inattendu');
             console.log('[mil] ✓ ' + new URL(url).hostname + ' (' + j.ac.length + ')');
             return j.ac.map(a => ({
                 icao24: a.hex,
@@ -799,42 +846,53 @@ async function fetchMilitaryFlights() {
                 country: a.t || a.r || '—',
                 military: true
             })).filter(f => f.lat != null && f.lon != null);
-        } catch (e) { console.warn('[mil] ✗', new URL(url).hostname, e.message); }
+        } catch (e) {
+            console.warn('[mil] ✗ ' + new URL(url).hostname + ' → ' + e.message);
+        }
     }
     return [];
 }
 
 async function fetchEarthquakes() {
     try {
+        // USGS supporte CORS nativement — pas de proxy nécessaire
         const r = await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson');
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const j = await r.json();
-        console.log('[USGS] ✓ ' + j.features.length);
+        console.log('[USGS] ✓ ' + j.features.length + ' séismes');
         return (j.features || []).map(f => ({
             id: f.id, time: new Date(f.properties.time),
             mag: f.properties.mag, place: f.properties.place,
             lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0],
             url: f.properties.url
         })).sort((a, b) => b.time - a.time);
-    } catch (e) { console.warn('[USGS] ✗', e.message); return []; }
+    } catch (e) {
+        console.warn('[USGS] ✗ ' + e.message);
+        return [];
+    }
 }
 
 async function fetchNews() {
     try {
-        const j = await fetchJSON('https://api.gdeltproject.org/api/v2/doc/doc?query=aviation&mode=artlist&maxrecords=50&format=json&timespan=1d');
+        const url = 'https://api.gdeltproject.org/api/v2/doc/doc?query=aviation&mode=artlist&maxrecords=50&format=json&timespan=1d';
+        const j = await fetchJSON(url);
         console.log('[GDELT] ✓ ' + (j.articles?.length || 0));
         return (j.articles || []).map((a, i) => ({
             id: 'n' + i, title: a.title, url: a.url,
             source: a.domain || 'GDELT', country: a.sourcecountry || '—', seen: a.seendate
         }));
-    } catch (e) { console.warn('[GDELT] ✗', e.message); return []; }
+    } catch (e) {
+        console.warn('[GDELT] ✗ ' + e.message);
+        return [];
+    }
 }
 
-// ============================================================
-// REFRESH
-// ============================================================
+/* ============================================================
+   REFRESH
+   ============================================================ */
 async function refreshAll() {
     setStatus('wait', 'Mise à jour…');
+
     const [flights, military, quakes, news] = await Promise.all([
         fetchFlights(), fetchMilitaryFlights(), fetchEarthquakes(), fetchNews()
     ]);
@@ -867,9 +925,9 @@ function setStatus(type, text) {
     txt.textContent = text;
 }
 
-// ============================================================
-// KPIs
-// ============================================================
+/* ============================================================
+   KPIs
+   ============================================================ */
 function updateKPIs() {
     const { flights, military, quakes } = state.data;
     document.getElementById('kpiFlights').textContent = flights.length;
@@ -894,12 +952,13 @@ function updateKPIs() {
         const avgVel = Math.round(withVel.reduce((s, f) => s + f.vel, 0) / withVel.length);
         document.getElementById('radarAvgSpeed').textContent = avgVel.toLocaleString('fr-FR');
     }
-    document.getElementById('radarApproach').textContent = allAir.filter(f => f.alt != null && f.alt < 3000 && f.vel != null && f.vel < 400).length;
+    document.getElementById('radarApproach').textContent =
+        allAir.filter(f => f.alt != null && f.alt < 3000 && f.vel != null && f.vel < 400).length;
 }
 
-// ============================================================
-// CHARTS
-// ============================================================
+/* ============================================================
+   CHARTS
+   ============================================================ */
 function updateCharts() {
     const allAir = [...state.data.flights, ...state.data.military];
 
@@ -965,9 +1024,9 @@ function chartOpts() {
     };
 }
 
-// ============================================================
-// TABLE
-// ============================================================
+/* ============================================================
+   TABLE
+   ============================================================ */
 function updateTable() {
     if (state.geoFilter.active) return applyGeoFilter();
     const allAir = [...state.data.military, ...state.data.flights];
@@ -1018,9 +1077,9 @@ function sortTable(col) {
     renderTable(sorted);
 }
 
-// ============================================================
-// MAP MARKERS
-// ============================================================
+/* ============================================================
+   MAP MARKERS
+   ============================================================ */
 function updateMapMarkers() {
     if (!state.map) return;
     if (state._markers) state._markers.forEach(m => state.map.removeLayer(m));
@@ -1036,9 +1095,9 @@ function updateMapMarkers() {
     });
 }
 
-// ============================================================
-// EXPORT CSV
-// ============================================================
+/* ============================================================
+   EXPORT CSV
+   ============================================================ */
 function exportCSV() {
     const allAir = [...state.data.military, ...state.data.flights];
     const headers = ['Type', 'Indicatif', 'Pays', 'Latitude', 'Longitude', 'Altitude (m)', 'Vitesse (km/h)'];
@@ -1071,9 +1130,9 @@ function exportCSV() {
     URL.revokeObjectURL(url);
 }
 
-// ============================================================
-// EXPORT PDF
-// ============================================================
+/* ============================================================
+   EXPORT PDF
+   ============================================================ */
 function exportPDF() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -1144,9 +1203,9 @@ function exportPDF() {
     doc.save(`radar_rapport_${now.toISOString().slice(0, 19).replace(/[:T]/g, '-')}.pdf`);
 }
 
-// ============================================================
-// MODAL
-// ============================================================
+/* ============================================================
+   MODAL
+   ============================================================ */
 function showDetail(index) {
     const r = state.tableRows[index];
     if (!r) return;
@@ -1163,9 +1222,9 @@ function showDetail(index) {
 function closeModal() { document.getElementById('detailModal').classList.remove('active'); }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 
-// ============================================================
-// NAV
-// ============================================================
+/* ============================================================
+   NAV
+   ============================================================ */
 document.querySelectorAll('.fr-nav__link').forEach(btn => {
     btn.addEventListener('click', () => {
         document.querySelectorAll('.fr-nav__link').forEach(b => b.classList.remove('active'));
@@ -1179,9 +1238,9 @@ document.querySelectorAll('.fr-nav__link').forEach(btn => {
     });
 });
 
-// ============================================================
-// UTILS
-// ============================================================
+/* ============================================================
+   UTILS
+   ============================================================ */
 function escapeHtml(s) {
     return String(s == null ? '' : s)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
