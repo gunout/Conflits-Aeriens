@@ -43,9 +43,10 @@
 **Radar Aérien France** est un tableau de bord de surveillance aérienne **100 % open source** qui agrège en temps réel :
 
 - ✈️ Les positions ADS-B des aéronefs au-dessus de la France métropolitaine
-- 🚨 Une détection **probabiliste** des aéronefs militaires (OTAN, USAF, Armée de l'Air)
+- 🚨 Une détection **probabiliste** des aéronefs militaires (indicatifs OTAN, bloc ICAO24)
 - 🌍 Les séismes mondiaux (M ≥ 2.5) des dernières 24 heures
 - 🗺️ Une carte interactive avec filtre géographique au clic
+- 📊 Des graphiques d'altitude, vitesse et magnitude sismique
 
 Le tout dans une interface inspirée du **Système de Design de l'État (DSFR)**, entièrement hébergée sur **GitHub Pages**, sans backend, sans clé API, sans inscription.
 
@@ -58,13 +59,13 @@ Le tout dans une interface inspirée du **Système de Design de l'État (DSFR)**
 | Fonctionnalité | Description |
 |---|---|
 | 🛰️ **Radar animé** | Balayage radar Canvas avec blips proportionnels à l'altitude |
-| 🔀 **Fusion multi-sources** | adsb.lol + adsb.fi interrogés **en parallèle**, dédoublonnés par ICAO24 |
-| 🎯 **Détection militaire** | Classification par code type OTAN, immatriculation et base readsb (`dbFlags`) |
+| 🌐 **Source OpenSky directe** | Appel CORS natif, sans proxy, données rafraîchies toutes les 5 min |
+| 🎯 **Détection militaire** | Classification par indicatif (RCH, DUKE, FAF, COTAM…) et bloc ICAO24 US |
 | 🗺️ **Carte interactive** | Leaflet + OpenStreetMap avec filtre géographique par rectangle |
 | 📊 **Graphiques** | Histogrammes altitudes, vitesses, magnitudes sismiques (Chart.js) |
-| 🔍 **Recherche & tri** | Tableau triable par indicatif, type, altitude, vitesse |
-| 📥 **Export** | CSV structuré (3 blocs) et PDF professionnel (jsPDF + AutoTable) |
-| 🔄 **Repli automatique** | Cascade de 6 proxys CORS si les sources natives échouent |
+| 🔍 **Recherche & tri** | Tableau triable par indicatif, pays, altitude, vitesse |
+| 📥 **Export** | CSV structuré et PDF professionnel (jsPDF + AutoTable) |
+| 🔄 **Cache automatique** | Conservation des dernières données valides en cas d'échec |
 | 📱 **Responsive** | Interface adaptée mobile, tablette et desktop |
 | ⚡ **Zéro dépendance backend** | Aucun serveur Node.js, aucune clé API, aucun compte |
 
@@ -85,32 +86,20 @@ Le tout dans une interface inspirée du **Système de Design de l'État (DSFR)**
 │                           ▼                                  │
 │              ┌────────────────────────┐                      │
 │              │  fetchFlights()        │                      │
-│              │  (fusion parallèle)    │                      │
+│              │  fetchEarthquakes()    │                      │
 │              └────────┬───────────────┘                      │
 └───────────────────────┼──────────────────────────────────────┘
                         │
-        ┌───────────────┼───────────────┐
-        ▼               ▼               ▼
-   ┌─────────┐    ┌─────────┐    ┌──────────────┐
-   │adsb.lol │    │ adsb.fi │    │ PocketWorld  │
-   │(direct) │    │(direct) │    │  (repli)     │
-   │ CORS ✅ │    │ CORS ✅ │    │ via 6 proxys │
-   └─────────┘    └─────────┘    └──────────────┘
-        │               │               │
-        └───────────────┼───────────────┘
-                        ▼
-                 ┌─────────────┐
-                 │  Fusion     │
-                 │  par ICAO24 │
-                 └──────┬──────┘
-                        ▼
-              ┌─────────────────────┐
-              │  ~120 aéronefs      │
-              │  uniques affichés   │
-              └─────────────────────┘
+        ┌───────────────┴───────────────┐
+        ▼                               ▼
+   ┌─────────────┐              ┌─────────────┐
+   │OpenSky API  │              │ USGS API    │
+   │  (direct)   │              │  (direct)   │
+   │  CORS ✅    │              │  CORS ✅    │
+   └─────────────┘              └─────────────┘
 ```
 
-**Aucun serveur intermédiaire** : tout se passe dans le navigateur de l'utilisateur. La déduplication, la détection militaire et la fusion sont effectuées côté client en JavaScript.
+**Aucun serveur intermédiaire** : le dashboard interroge directement OpenSky et USGS. La déduplication, la détection militaire et le cache sont effectués côté client en JavaScript.
 
 ---
 
@@ -118,14 +107,13 @@ Le tout dans une interface inspirée du **Système de Design de l'État (DSFR)**
 
 | Source | Type | CORS | Clé API | Fréquence |
 |---|---|---|---|---|
-| [**adsb.lol**](https://adsb.lol) | ADS-B civils + militaires | ✅ Natif | ❌ Aucune | 45 s |
-| [**adsb.fi**](https://adsb.fi) | Miroir ADS-B | ✅ Natif | ❌ Aucune | 45 s |
-| [**PocketWorld**](https://pocketworld.org) | Agrégateur (repli) | ❌ Via proxy | ❌ Aucune | 45 s |
-| [**USGS**](https://earthquake.usgs.gov) | Séismes mondiaux | ✅ Natif | ❌ Aucune | 45 s |
+| [**OpenSky Network**](https://opensky-network.org) | ADS-B civils + militaires | ✅ Natif | ❌ Aucune | 5 min |
+| [**USGS**](https://earthquake.usgs.gov) | Séismes mondiaux | ✅ Natif | ❌ Aucune | 5 min |
 
-**Couverture géographique** : 5 cercles de 150 à 250 NM couvrent l'hexagone entier (Paris, Lyon, Bordeaux, Lille, Brest, Nice, Corse, Toulouse, Biarritz, Perpignan).
+**Zone couverte** : France métropolitaine et pays limitrophes  
+(bbox `41°N–51.5°N`, `-5.5°E–9.8°E`)
 
-**Fréquence de rafraîchissement** : 45 secondes — un compromis raisonnable pour ne pas saturer les serveurs bénévoles.
+**Fréquence de rafraîchissement** : 5 minutes — un compromis conforme aux limites de l'accès anonyme OpenSky (~400 crédits/jour).
 
 ---
 
@@ -149,7 +137,7 @@ open index.html          # macOS
 xdg-open index.html      # Linux
 start index.html         # Windows
 
-# Option B — Avec un serveur local (recommandé pour éviter les CORS)
+# Option B — Avec un serveur local (recommandé)
 python3 -m http.server 8080
 # → http://localhost:8080
 ```
@@ -189,17 +177,9 @@ https://VOTRE-USER.github.io/Conflits-Aeriens/
 
 ## 🎯 Détection militaire
 
-La détection est **probabiliste** et repose sur 3 critères cumulés :
+La détection est **probabiliste** et repose sur 2 critères :
 
-### 1. Base readsb (`dbFlags`)
-
-Le bit 1 du champ `dbFlags` fourni par adsb.lol/adsb.fi marque directement les aéronefs connus comme militaires dans la base de données communautaire.
-
-```js
-military: !!((ac.dbFlags || 0) & 1)
-```
-
-### 2. Bloc d'adresses ICAO24 (US Military)
+### 1. Bloc d'adresses ICAO24 (US Military)
 
 Le bloc `ADF7C7` → `AFFFFF` est réservé aux aéronefs militaires américains.
 
@@ -210,22 +190,26 @@ function isUsMilitaryHex(hex) {
 }
 ```
 
-### 3. Codes type OTAN + Immatriculation
+### 2. Indicatifs militaires connus
 
 ```js
-const MILITARY_TYPECODES = new Set([
-    'C17', 'C130', 'KC135', 'A400', 'F16', 'F35', 'RAFA', ...
-]);
-const MILITARY_REG_PREFIXES = ['FR', 'FU', 'FM']; // F-R (Air), F-U (Marine), F-M (ALAT)
+const MILITARY_CALLSIGN_PREFIXES = [
+    // US Air Force
+    'RCH', 'REACH', 'DUKE', 'HAWK', 'HUNTER', 'KILLER', 'LUCKY',
+    'GAMBLER', 'BOOKIE', 'TIGER', 'POUNCE', 'BENGAL',
+    // Forces françaises
+    'FAF', 'FRAF', 'COTAM',
+    // OTAN / Alliés
+    'NATO', 'AWACS', 'MAGIC', 'SENTRY',
+    'CFC', 'ASCOT', 'RRR', 'GAF', 'IAM', 'PLF', 'BAF', 'NAF'
+];
 ```
-
-> **⚠️ Précision importante** : le préfixe **F-G** correspond à l'aviation **civile** privée française (Cessna, DR400…) et **n'est pas** considéré comme militaire. Seuls F-R, F-U et F-M le sont.
 
 ### Limites
 
 - ❌ Un aéronef militaire volant **transpondeur éteint** est invisible
-- ❌ Un aéronef civil enregistré dans un bloc militaire (rare) peut générer un faux positif
 - ❌ La classification n'est **pas officielle** — elle ne remplace pas les systèmes de défense
+- ⚠️ Aucune donnée de type d'appareil (OpenSky ne fournit pas le `typecode`)
 
 ---
 
@@ -260,9 +244,9 @@ Conflits-Aeriens/
 | Limitation | Cause | Impact |
 |---|---|---|
 | **Aéronefs militaires invisibles** | Transpondeur éteint ou mode non coopératif | Détection partielle |
-| **Couverture dépendante des récepteurs** | Réseau bénévole ADS-B | Zones rurales moins couvertes |
+| **Pas de typecode** | OpenSky ne fournit pas le modèle | Colonne « Statut » simplifiée |
+| **Rate-limit OpenSky** | ~400 crédits/jour en anonyme | Refresh limité à 5 min |
 | **Latence 5–15 s** | Propagation ADS-B → serveur → navigateur | Non temps réel strict |
-| **Rate-limits possibles** | Quotas gratuits des APIs | Repli automatique |
 | **Précision militaire** | Classification probabiliste | Faux positifs/négatifs possibles |
 
 > Ce radar est un **outil de veille open source**, il **ne remplace pas** les systèmes officiels de surveillance aérienne (radar primaire, IFF, Link 16).
@@ -281,14 +265,14 @@ Les contributions sont **bienvenues** ! Voici comment procéder :
 
 ### Idées d'améliorations
 
-- [ ] Ajouter les NOTAM (zones d'exclusion)
-- [ ] Intégrer les trajectoires historiques (IndexedDB)
+- [ ] Enrichir les données avec l'API adsbdb (modèle, immatriculation, compagnie)
+- [ ] Ajouter les trajectoires historiques (IndexedDB)
 - [ ] Filtrer par compagnie aérienne
 - [ ] Mode sombre (DSFR `data-fr-scheme="dark"`)
 - [ ] PWA avec Service Worker (hors ligne)
-- [ ] Notifications push pour événements critiques
-- [ ] Ajouter l'API EMSC (séismes Europe)
-- [ ] Ajouter les volcans actifs (Smithsonian)
+- [ ] Notifications push pour les aéronefs militaires détectés
+- [ ] Ajouter les NOTAM (zones d'exclusion)
+- [ ] Intégrer l'API EMSC pour les séismes européens
 
 ### Signaler un bug
 
@@ -325,7 +309,7 @@ La charte visuelle s'inspire du **Système de Design de l'État (DSFR)**, publi�
 
 Les données affichées proviennent exclusivement de **sources publiques et ouvertes** :
 
-- **ADS-B** : signaux émis volontairement par les aéronefs, captés par des réseaux communautaires bénévoles
+- **ADS-B** : signaux émis volontairement par les aéronefs, captés par le réseau OpenSky
 - **USGS** : domaine public
 - **OpenStreetMap** : ODbL
 
@@ -365,7 +349,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-Les **données** restent sous leurs licences respectives (domaine public pour USGS, ODbL pour OpenStreetMap, open data pour ADS-B).
+Les **données** restent sous leurs licences respectives (domaine public pour USGS, ODbL pour OpenStreetMap, OpenSky Network Terms pour ADS-B).
 
 ---
 
@@ -379,7 +363,7 @@ Les **données** restent sous leurs licences respectives (domaine public pour US
 [![GitHub Forks](https://img.shields.io/github/forks/gunout/Conflits-Aeriens?style=social)](https://github.com/gunout/Conflits-Aeriens)
 [![GitHub Issues](https://img.shields.io/github/issues/gunout/Conflits-Aeriens?style=social)](https://github.com/gunout/Conflits-Aeriens/issues)
 
-**Fait en France — © 2026**
+**Fait avec ❤️ en France — © 2026**
 
 </div>
 
