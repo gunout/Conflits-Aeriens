@@ -512,12 +512,61 @@ main { padding: 1.5rem 0 3rem; }
 'use strict';
 
 /* ============================================================
+   CASCADE DE PROXYS CORS — Fallback automatique
+   PocketWorld n'expose pas d'en-tête CORS. On relaye la requête
+   via un proxy qui ajoute cet en-tête.
+   ============================================================ */
+const CORS_PROXIES = [
+    (url) => 'https://corsproxy.io/?url=' + encodeURIComponent(url),
+    (url) => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
+    (url) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+    (url) => 'https://cors-anywhere.com/' + url,
+    (url) => 'https://test.cors.workers.dev/?' + url,
+    (url) => 'https://api.cors.lol/?url=' + encodeURIComponent(url)
+];
+
+async function fetchJSON(targetUrl) {
+    let lastError = null;
+
+    for (let i = 0; i < CORS_PROXIES.length; i++) {
+        const proxyUrl = CORS_PROXIES[i](targetUrl);
+        let proxyName = 'inconnu';
+        try { proxyName = new URL(proxyUrl).hostname; } catch (e) {}
+
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 10000);
+
+            const r = await fetch(proxyUrl, { signal: controller.signal });
+            clearTimeout(timeout);
+
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+
+            const text = await r.text();
+            const trimmed = text.trim();
+            if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+                throw new Error('Réponse non-JSON');
+            }
+
+            const data = JSON.parse(trimmed);
+            console.log(`[proxy] ✓ ${proxyName} → ${targetUrl.slice(0, 55)}…`);
+            return data;
+
+        } catch (e) {
+            lastError = e;
+            console.warn(`[proxy] ✗ ${proxyName} → ${e.message}`);
+        }
+    }
+
+    console.error(`[proxy] ✗ Tous les proxys ont échoué pour ${targetUrl.slice(0, 60)}…`);
+    throw lastError || new Error('Aucun proxy disponible');
+}
+
+/* ============================================================
    CONFIGURATION
-   PocketWorld expose des endpoints avec CORS ouvert nativement.
-   Aucune clé, aucune inscription, aucun proxy nécessaire.
    ============================================================ */
 const POCKETWORLD = 'https://pocketworld.org/api';
-const BBOX_FRANCE = '-5,42,9,51'; // west,south,east,north
+const BBOX_FRANCE = '-5,42,9,51';
 
 const state = {
     charts: { alt: null, speed: null, quakes: null },
@@ -538,7 +587,7 @@ const state = {
 };
 
 /* ============================================================
-   DÉTECTION MILITAIRE — par type d'aéronef
+   DÉTECTION MILITAIRE
    ============================================================ */
 const MILITARY_TYPECODES = new Set([
     'C17', 'C5M', 'C130', 'C30J', 'KC135', 'K35R', 'KC10', 'KC46',
@@ -764,7 +813,7 @@ function applyGeoFilter() {
     state.tableRows = filtered.map(f => ({
         callsign: f.callsign || '—', typecode: f.typecode || '—',
         alt: f.alt, vel: f.vel, lat: f.lat, lon: f.lon,
-        category: f.category || f.transport_kind || '—',
+        category: f.category || f.transportKind || '—',
         military: !!f.military
     }));
     renderTable(state.tableRows);
@@ -774,14 +823,12 @@ function applyGeoFilter() {
 }
 
 /* ============================================================
-   FETCH — PocketWorld (CORS ouvert, pas de proxy)
+   FETCH — PocketWorld via cascade de proxys
    ============================================================ */
 async function fetchFlights() {
     try {
         const url = `${POCKETWORLD}/flights?wire=1&bbox=${BBOX_FRANCE}`;
-        const r = await fetch(url);
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const j = await r.json();
+        const j = await fetchJSON(url);
         const fields = j.flight_fields || [];
         const rows = j.flight_rows || [];
         console.log('[flights] ✓ ' + rows.length + ' aéronefs (' + (j.total || 0) + ' total)');
@@ -800,7 +847,6 @@ async function fetchFlights() {
                 registration: a.registration || '',
                 category: a.category || '—',
                 transportKind: a.transport_kind || '—',
-                model: a.model || '',
                 military: false
             };
         }).filter(f => f.lat != null && f.lon != null);
@@ -838,7 +884,6 @@ async function refreshAll() {
         fetchFlights(), fetchEarthquakes()
     ]);
 
-    // Séparation civil / militaire
     const military = flights.filter(f => { f.military = isMilitary(f); return f.military; });
     const civil = flights.filter(f => !f.military);
 
@@ -1198,7 +1243,7 @@ function escapeHtml(s) {
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 function showAbout() {
-    alert("Radar Aérien France\n\nOutil tiers indépendant, non gouvernemental.\nHébergement : GitHub Pages\nSource : PocketWorld (agrégateur ADS-B)\nSéismes : USGS\n\nAucune clé API, aucun proxy, aucun backend.");
+    alert("Radar Aérien France\n\nOutil tiers indépendant, non gouvernemental.\nHébergement : GitHub Pages\nSource : PocketWorld (agrégateur ADS-B)\nSéismes : USGS\n\nAucune clé API, aucun backend.");
 }
 
 window.addEventListener('beforeunload', () => {
