@@ -265,16 +265,6 @@ main { padding: 1.5rem 0 3rem; }
 }
 .fr-footer__brand { display: flex; align-items: center; gap: 0.75rem; color: var(--blue-france); font-weight: 700; margin-bottom: 1rem; }
 
-.fr-spinner {
-    width: 14px; height: 14px;
-    border: 2px solid var(--blue-mid);
-    border-top-color: var(--blue-france);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    display: inline-block; vertical-align: middle;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
 .fr-modal {
     display: none; position: fixed; inset: 0;
     background: rgba(22,22,22,0.6);
@@ -368,7 +358,7 @@ main { padding: 1.5rem 0 3rem; }
         <div class="fr-kpi fr-kpi--success">
             <div class="fr-kpi__label"><i class="fas fa-plane"></i> Aéronefs détectés</div>
             <div class="fr-kpi__value" id="kpiFlights">—</div>
-            <span class="fr-kpi__trend">Boîte englobante France</span>
+            <span class="fr-kpi__trend" id="kpiFlightsTrend">Fusion adsb.lol + adsb.fi</span>
         </div>
         <div class="fr-kpi fr-kpi--warning">
             <div class="fr-kpi__label"><i class="fas fa-fighter-jet"></i> Militaires probables</div>
@@ -494,7 +484,7 @@ main { padding: 1.5rem 0 3rem; }
                 <div style="font-size:0.75rem;font-weight:400;color:var(--text-mention);">Outil tiers indépendant — non gouvernemental</div>
             </div>
         </div>
-        <div>Hébergement : GitHub Pages · Données : adsb.lol + adsb.fi (repli PocketWorld) · USGS · © 2026 MIT</div>
+        <div>Hébergement : GitHub Pages · Sources : adsb.lol + adsb.fi (fusion) · Repli PocketWorld · USGS · © 2026 MIT</div>
     </div>
 </footer>
 
@@ -512,18 +502,17 @@ main { padding: 1.5rem 0 3rem; }
 'use strict';
 
 /* ============================================================
-   RÉSEAU v2
-   1) Sources ADS-B natives avec CORS (adsb.lol, adsb.fi) — zéro proxy
-   2) Repli PocketWorld via cascade de proxys durcis
-      (proxy « sticky » + backoff : évite les 429 du martèlement)
+   RÉSEAU v3 — FUSION PARALLÈLE
+   - adsb.lol + adsb.fi interrogés EN PARALLÈLE
+   - Fusion par ICAO24 (dédoublonnage)
+   - Repli PocketWorld via cascade de proxys durcis
    ============================================================ */
 const ADSB_DIRECT = [
     { name: 'adsb.lol', base: 'https://api.adsb.lol/v2' },
     { name: 'adsb.fi',  base: 'https://opendata.adsb.fi/api/v2' }
 ];
 
-// Cercles de couverture (l'API accepte 250 NM max par requête) :
-// l'hexagone complet n'entre pas dans un seul cercle → 5 requêtes dédupliquées par hex.
+// 5 cercles de 250 NM max pour couvrir l'hexagone
 const FR_COVER = [
     { lat: 47.0, lon: 2.4,  dist: 250 },   // Cœur (Paris, Lyon, Bordeaux, Lille)
     { lat: 49.0, lon: 2.5,  dist: 180 },   // Nord / Île-de-France
@@ -538,7 +527,7 @@ const CATEGORY_FR = {
     A7: 'Hélico', A8: 'Gyrocoptère', A9: 'Ultra-léger',
     B1: 'Ballon', B2: 'Dirigeable', C1: 'Planeur'
 };
-const ftToM = v => (typeof v === 'number' ? Math.round(v * 0.3048) : null); // pieds → mètres
+const ftToM = v => (typeof v === 'number' ? Math.round(v * 0.3048) : null);
 
 async function fetchJSONRaw(url, timeoutMs = 10000, unwrap = null) {
     const ctrl = new AbortController();
@@ -552,50 +541,49 @@ async function fetchJSONRaw(url, timeoutMs = 10000, unwrap = null) {
     } finally { clearTimeout(timer); }
 }
 
-/* --- Sources directes (CORS natif, pas de proxy) --- */
+/* --- Source directe (CORS natif) : 5 requêtes séquentielles, dédup par hex --- */
 async function fetchADSBSource(src) {
     const byHex = new Map();
     let lastErr = null;
-    for (const c of FR_COVER) {                        // séquentiel : évite les rate-limits
+    let errors = 0;
+    for (const c of FR_COVER) {
         try {
             const j = await fetchJSONRaw(`${src.base}/lat/${c.lat}/lon/${c.lon}/dist/${c.dist}`);
             for (const ac of (j.ac || [])) {
                 if (ac.lat == null || ac.lon == null) continue;
-                if (ac.alt_baro === 'ground') continue; // on ne garde que les aéronefs en vol
+                if (ac.alt_baro === 'ground') continue;
                 if (ac.lat < FR_BBOX.latMin || ac.lat > FR_BBOX.latMax) continue;
                 if (ac.lon < FR_BBOX.lonMin || ac.lon > FR_BBOX.lonMax) continue;
                 const key = (ac.hex || '').replace('~', '').trim().toLowerCase();
+                if (!key) continue;
                 const prev = byHex.get(key);
-                // Déduplication : on garde la position la plus fraîche (seen_pos minimal)
-                if (key && (!prev || (ac.seen_pos ?? 999) < (prev.seen_pos ?? 999))) byHex.set(key, ac);
+                // Garde la position la plus fraîche
+                if (!prev || (ac.seen_pos ?? 999) < (prev.seen_pos ?? 999)) byHex.set(key, ac);
             }
-        } catch (e) { lastErr = e; }
+        } catch (e) { lastErr = e; errors++; }
     }
-    if (!byHex.size && lastErr) throw lastErr;
+    // Si toutes les requêtes ont échoué, on lève l'erreur
+    if (errors === FR_COVER.length && lastErr) throw lastErr;
     return [...byHex.values()];
 }
 
 function normalizeADSB(list, srcName) {
-    const flights = list.map(ac => ({
+    return list.map(ac => ({
         icao24: (ac.hex || '').replace('~', '').trim().toLowerCase(),
         callsign: (ac.flight || ac.hex || '').trim() || '—',
         lat: ac.lat, lon: ac.lon,
         alt: ftToM(ac.alt_baro) ?? ftToM(ac.alt_geom),
-        vel: typeof ac.gs === 'number' ? Math.round(ac.gs * 1.852) : null, // nœuds → km/h
+        vel: typeof ac.gs === 'number' ? Math.round(ac.gs * 1.852) : null,
         country: '—',
         typecode: ac.t || '—',
         registration: ac.r || '',
         category: CATEGORY_FR[ac.category] || ac.category || '—',
         transportKind: srcName,
-        military: !!((ac.dbFlags || 0) & 1)   // bit 1 de dbFlags = militaire (base readsb)
+        military: !!((ac.dbFlags || 0) & 1)
     })).filter(f => f.lat != null && f.lon != null);
-    state.lastSource = srcName;
-    console.log(`[adsb] ✓ ${flights.length} aéronefs via ${srcName}`);
-    return flights;
 }
 
-/* --- Cascade de proxys (repli PocketWorld uniquement) ---
-   cors-anywhere.com retiré : il exige une opt-in manuelle (d'où vos 502/500). */
+/* --- Cascade de proxys (repli PocketWorld) --- */
 const CORS_PROXIES = [
     { name: 'corsproxy.io',   build: u => 'https://corsproxy.io/?url=' + encodeURIComponent(u) },
     { name: 'codetabs',       build: u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u) },
@@ -606,8 +594,8 @@ const CORS_PROXIES = [
     { name: 'cors.workers',   build: u => 'https://test.cors.workers.dev/?' + u }
 ];
 
-let stickyProxy = null;          // dernier proxy gagnant → testé en premier
-const proxyFails = new Map();    // index → { n, until } : backoff par proxy
+let stickyProxy = null;
+const proxyFails = new Map();
 
 async function fetchViaProxies(targetUrl) {
     const now = Date.now();
@@ -620,13 +608,13 @@ async function fetchViaProxies(targetUrl) {
         try {
             const data = await fetchJSONRaw(p.build(targetUrl), 8000, p.unwrap);
             stickyProxy = i; proxyFails.delete(i);
-            console.log(`[proxy] ✓ ${p.name} → ${targetUrl.slice(0, 55)}…`);
+            console.log(`[proxy] ✓ ${p.name}`);
             return data;
         } catch (e) {
             lastErr = e;
             const s = proxyFails.get(i) || { n: 0, until: 0 };
             s.n++;
-            const step = /429/.test(e.message) ? 120000 : 30000;  // backoff long sur 429
+            const step = /429/.test(e.message) ? 120000 : 30000;
             s.until = Date.now() + Math.min(s.n * step, 600000);
             proxyFails.set(i, s);
             console.warn(`[proxy] ✗ ${p.name} → ${e.message} (pause ${Math.round((s.until - Date.now()) / 1000)}s)`);
@@ -648,6 +636,7 @@ const state = {
     _renderedRows: [],
     sortDir: {},
     lastSource: null,
+    lastStats: null,
     map: null,
     drawnItems: null,
     geoFilter: { active: false, bounds: null },
@@ -663,8 +652,6 @@ const state = {
 
 /* ============================================================
    DÉTECTION MILITAIRE
-   ⚠ Le préfixe F-G = AVIATION CIVILE privée française (Cessna, DR400…).
-   Les immatriculations militaires françaises sont : F-R (Air), F-U (Marine), F-M (ALAT).
    ============================================================ */
 const MILITARY_TYPECODES = new Set([
     'C17', 'C5M', 'C130', 'C30J', 'KC135', 'K35R', 'KC10', 'KC46',
@@ -675,16 +662,15 @@ const MILITARY_TYPECODES = new Set([
     'B52', 'B1', 'B2',
     'V22', 'CH47', 'UH60', 'AH64', 'NH90', 'EH10', 'H160', 'AS565'
 ]);
-const MILITARY_REG_PREFIXES = ['FR', 'FU', 'FM']; // après normalisation (F-RADA → FRADA)
+const MILITARY_REG_PREFIXES = ['FR', 'FU', 'FM'];
 
-// Bloc ONU des aéronefs militaires américains (ADF7C7 → AFFFFF)
 function isUsMilitaryHex(hex) {
     const h = (hex || '').replace('~', '').toUpperCase();
     return h.length === 6 && h >= 'ADF7C7' && h <= 'AFFFFF';
 }
 
 function isMilitary(a) {
-    if (a.military) return true;                        // marquage dbFlags (readsb)
+    if (a.military) return true;
     if (isUsMilitaryHex(a.icao24)) return true;
     const tc = (a.typecode || '').toUpperCase();
     if (MILITARY_TYPECODES.has(tc)) return true;
@@ -698,7 +684,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initRadar();
     initMap();
     refreshAll();
-    state.updateInterval = setInterval(refreshAll, 45000); // 45 s : plus raisonnable pour les API gratuites
+    state.updateInterval = setInterval(refreshAll, 45000);
 });
 
 /* ============================================================
@@ -760,7 +746,6 @@ function animateRadar() {
         if (state.radar.sweepAngle > Math.PI * 2) state.radar.sweepAngle = 0;
     }
 
-    // createConicGradient n'existe pas sur les navigateurs anciens → garde-fou
     if (typeof ctx.createConicGradient === 'function') {
         const sweepGrad = ctx.createConicGradient(state.radar.sweepAngle, cx, cy);
         sweepGrad.addColorStop(0, 'rgba(0, 255, 136, 0.0)');
@@ -911,18 +896,60 @@ function applyGeoFilter() {
 }
 
 /* ============================================================
-   FETCH — 1) sources ADS-B directes, 2) repli PocketWorld (proxys)
+   FETCH — FUSION PARALLÈLE + repli PocketWorld
    ============================================================ */
 async function fetchFlights() {
-    for (const src of ADSB_DIRECT) {
-        try {
+    console.log('[flights] Fusion parallèle adsb.lol + adsb.fi…');
+
+    // 1. Lance les deux sources EN PARALLÈLE
+    const settled = await Promise.allSettled(
+        ADSB_DIRECT.map(async src => {
+            const t0 = performance.now();
             const acs = await fetchADSBSource(src);
-            if (acs.length) return normalizeADSB(acs, src.name);
-            console.warn(`[adsb:${src.name}] réponse vide`);
-        } catch (e) {
-            console.warn(`[adsb:${src.name}] ✗ ${e.message}`);
+            const dt = Math.round(performance.now() - t0);
+            return { src: src.name, list: acs, ms: dt };
+        })
+    );
+
+    // 2. Récupère les résultats (même partiels)
+    const results = settled
+        .filter(r => r.status === 'fulfilled')
+        .map(r => r.value);
+
+    // 3. Fusion par ICAO24
+    const byHex = new Map();
+    const perSource = {};
+    for (const { src, list, ms } of results) {
+        perSource[src] = list.length;
+        console.log(`[adsb:${src}] ${list.length} aéronefs en ${ms} ms`);
+        for (const ac of list) {
+            const key = (ac.hex || '').replace('~', '').trim().toLowerCase();
+            if (!key) continue;
+            const prev = byHex.get(key);
+            // Priorité : garder la donnée la plus fraîche
+            if (!prev || (ac.seen_pos ?? 999) < (prev.seen_pos ?? 999)) {
+                byHex.set(key, ac);
+            }
         }
     }
+
+    // 4. Log si une source est défaillante
+    const failures = settled.filter(r => r.status === 'rejected');
+    failures.forEach((r, i) => {
+        console.warn(`[adsb:${ADSB_DIRECT[i]?.name || '?'}] ✗`, r.reason?.message || 'échec');
+    });
+
+    // 5. Si au moins une source a répondu, on retourne la fusion
+    if (byHex.size > 0) {
+        const total = [...byHex.values()];
+        state.lastSource = 'adsb.lol + adsb.fi (fusion)';
+        state.lastStats = perSource;
+        console.log(`[flights] ✓ Fusion : ${total.length} aéronefs uniques (${Object.entries(perSource).map(([k, v]) => `${k}=${v}`).join(', ')})`);
+        return normalizeADSB(total, 'adsb.lol+adsb.fi');
+    }
+
+    // 6. Repli PocketWorld
+    console.warn('[flights] Aucune source ADS-B native n\'a répondu → repli PocketWorld');
     try { return await fetchPocketWorldFlights(); }
     catch (e) { console.warn('[flights] ✗ ' + e.message); return []; }
 }
@@ -932,6 +959,7 @@ async function fetchPocketWorldFlights() {
     const fields = j.flight_fields || [];
     const rows = j.flight_rows || [];
     state.lastSource = 'PocketWorld (proxy)';
+    state.lastStats = { PocketWorld: rows.length };
     console.log('[flights] ✓ ' + rows.length + ' aéronefs (' + (j.total || 0) + ' total) via PocketWorld');
     return rows.map(row => {
         const a = {};
@@ -980,7 +1008,6 @@ async function refreshAll() {
         fetchFlights(), fetchEarthquakes()
     ]);
 
-    // ⚠ On ne réécrase pas le marquage militaire issu de dbFlags
     flights.forEach(f => { if (!f.military) f.military = isMilitary(f); });
     const military = flights.filter(f => f.military);
     const civil = flights.filter(f => !f.military);
@@ -1003,7 +1030,17 @@ async function refreshAll() {
     const now = new Date().toLocaleTimeString('fr-FR');
     document.getElementById('lastUpdate').textContent = now;
     document.getElementById('radarLastUpdate').textContent = 'MAJ : ' + now;
-    document.getElementById('radarSource').textContent = 'Source : ' + (state.lastSource || '—');
+
+    // Affiche les stats de fusion dans le footer du radar
+    let srcLabel = state.lastSource || '—';
+    if (state.lastStats && Object.keys(state.lastStats).length > 1) {
+        srcLabel += ' — ' + Object.entries(state.lastStats)
+            .map(([k, v]) => `${k}: ${v}`).join(' · ');
+    } else if (state.lastStats) {
+        const [k, v] = Object.entries(state.lastStats)[0];
+        srcLabel += ' — ' + v + ' aéronefs';
+    }
+    document.getElementById('radarSource').textContent = 'Source : ' + srcLabel;
     document.getElementById('radarTargetCount').textContent = flights.length;
 }
 
@@ -1024,6 +1061,12 @@ function updateKPIs() {
     document.getElementById('kpiFlights').textContent = flights.length + military.length;
     document.getElementById('kpiMil').textContent = military.length;
     document.getElementById('kpiMilTrend').textContent = military.length > 0 ? 'Types détectés' : 'Aucun';
+
+    // Trend de couverture par source
+    if (state.lastStats && Object.keys(state.lastStats).length > 1) {
+        document.getElementById('kpiFlightsTrend').textContent =
+            Object.entries(state.lastStats).map(([k, v]) => `${k} : ${v}`).join(' · ');
+    }
 
     const allAir = [...flights, ...military];
     const withAlt = allAir.filter(f => f.alt != null);
@@ -1134,7 +1177,7 @@ function updateTable() {
 }
 
 function renderTable(rows) {
-    state._renderedRows = rows;  // index stable pour showDetail même après filtre/tri
+    state._renderedRows = rows;
     const tbody = document.getElementById('eventsBody');
     if (!rows.length) {
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:1.5rem;">Aucun aéronef détecté</td></tr>';
@@ -1208,16 +1251,15 @@ function showAbout() {
     document.getElementById('modalBody').innerHTML = `
         <p><strong>Radar Aérien France</strong> est un outil tiers <strong>indépendant</strong>,
         non édité, non approuvé et non affilié à l'État français ou à l'Armée de l'Air.</p>
-        <p style="margin-top:0.75rem;">Il agrège uniquement des <strong>données ADS-B publiques</strong>,
-        transmises volontairement par les aéronefs équipés :</p>
+        <p style="margin-top:0.75rem;">Il agrège uniquement des <strong>données ADS-B publiques</strong> :</p>
         <ul style="margin:0.75rem 0 0 1.25rem;">
-            <li><strong>adsb.lol</strong> et <strong>adsb.fi</strong> — réseaux communautaires open data (CORS natif, sans proxy)</li>
-            <li><strong>PocketWorld</strong> — agrégateur, accessible via proxys en repli</li>
+            <li><strong>adsb.lol</strong> + <strong>adsb.fi</strong> — <em>fusion parallèle</em> (CORS natif, sans proxy)</li>
+            <li><strong>PocketWorld</strong> — repli via proxys CORS</li>
             <li><strong>USGS</strong> — séismes M ≥ 2.5 des dernières 24 h</li>
         </ul>
         <p style="margin-top:0.75rem;font-size:0.8rem;color:var(--text-mention);">
-            Les positions proviennent de l'équipement de bord des aéronefs.
-            La détection « militaire » est probabiliste et ne constitue pas une information officielle.
+            <strong>Fusion :</strong> les deux sources ADS-B sont interrogées en parallèle puis dédoublonnées
+            par code ICAO24, ce qui maximise le nombre d'aéronefs visibles (chaque réseau a ses propres récepteurs bénévoles).
             Code source : MIT © 2026.
         </p>`;
     document.getElementById('detailModal').classList.add('active');
@@ -1285,7 +1327,7 @@ function exportCSV() {
 /* ============================================================
    EXPORT PDF
    ============================================================ */
-const nf = n => n.toLocaleString('fr-FR').replace(/[\u202F\u00A0]/g, ' '); // espaces fines non gérées par Helvetica
+const nf = n => n.toLocaleString('fr-FR').replace(/[\u202F\u00A0]/g, ' ');
 
 function exportPDF() {
     const { jsPDF } = window.jspdf;
