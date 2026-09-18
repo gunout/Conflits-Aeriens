@@ -518,10 +518,10 @@ const FALLBACK_PROXIES = [
 /* ============================================================
    SOURCES ADS-B
    ============================================================ */
-const ADSB_DIRECT = [
-    { name: 'adsb.lol', base: 'https://api.adsb.lol/v2' },
-    { name: 'adsb.fi',  base: 'https://opendata.adsb.fi/api/v2' }
-];
+const ADSB_SOURCE = { 
+    name: 'airplanes.live', 
+    base: 'https://api.airplanes.live/v2' 
+};
 
 const FR_CENTER = { lat: 47.0, lon: 2.4, dist: 250 };
 const FR_BBOX = { latMin: 41.0, latMax: 51.5, lonMin: -5.5, lonMax: 9.8 };
