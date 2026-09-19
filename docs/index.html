@@ -122,7 +122,6 @@ main { padding: 1.5rem 0 3rem; }
     margin: 1.75rem 0 0.75rem; display: flex; align-items: center; gap: 0.5rem;
 }
 .fr-section-title i { color: var(--blue-france); }
-.fr-section-sub { font-size: 0.85rem; color: var(--text-mention); margin-bottom: 1rem; }
 
 .fr-kpi-grid {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -244,6 +243,8 @@ main { padding: 1.5rem 0 3rem; }
 }
 .fr-tag--info { background: var(--blue-mid); color: var(--blue-france); }
 .fr-tag--mil { background: #FFE9FF; color: #B300B3; font-weight: 700; }
+.fr-tag--quake { background: #FFE5E5; color: #B30000; font-weight: 700; }
+.fr-tag--tsunami { background: #FFD700; color: #8B0000; font-weight: 700; }
 
 .fr-search {
     display: flex; align-items: center; gap: 0.5rem;
@@ -285,6 +286,74 @@ main { padding: 1.5rem 0 3rem; }
 .fr-modal__close { background: none; border: none; font-size: 1.4rem; color: var(--text-mention); cursor: pointer; line-height: 1; }
 .fr-modal__body { padding: 1.25rem; }
 
+/* Légende carte personnalisée */
+.map-legend {
+    background: rgba(255,255,255,0.95);
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    font-size: 0.75rem;
+    line-height: 1.6;
+    border: 1px solid var(--border);
+}
+.map-legend__title {
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: var(--blue-france);
+    font-size: 0.8rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
+}
+.map-legend__item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+}
+.map-legend__dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.map-legend__dot--civil { background: #000091; }
+.map-legend__dot--mil { background: #FF00FF; }
+.map-legend__dot--quake { background: #E1000F; opacity: 0.7; border: 2px solid #B30000; }
+
+/* Popup séisme */
+.quake-popup {
+    font-family: "Marianne", system-ui, sans-serif;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    min-width: 220px;
+}
+.quake-popup__title {
+    font-weight: 700;
+    font-size: 0.95rem;
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+}
+.quake-popup__row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+}
+.quake-popup__row strong {
+    color: var(--text-mention);
+    font-weight: 600;
+}
+.quake-popup__link {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 4px 8px;
+    background: var(--blue-france);
+    color: #fff !important;
+    border-radius: 3px;
+    text-decoration: none;
+    font-size: 0.75rem;
+}
+
 @media (max-width: 640px) {
     .fr-kpi-grid { grid-template-columns: 1fr 1fr; gap: 0.6rem; }
     .fr-kpi { padding: 0.9rem; }
@@ -324,6 +393,7 @@ main { padding: 1.5rem 0 3rem; }
             <li><button class="fr-nav__link active" data-tab="overview">Vue d'ensemble</button></li>
             <li><button class="fr-nav__link" data-tab="radar">Radar</button></li>
             <li><button class="fr-nav__link" data-tab="map">Carte</button></li>
+            <li><button class="fr-nav__link" data-tab="quakes">Séismes</button></li>
         </ul>
     </div>
 </nav>
@@ -335,7 +405,8 @@ main { padding: 1.5rem 0 3rem; }
         <div>
             <strong>Outil tiers non gouvernemental.</strong>
             Ce radar n'est ni édité, ni approuvé, ni affilié à l'État français ou à l'Armée de l'Air.
-            Il utilise uniquement des <em>données ADS-B publiques</em> transmises par les aéronefs eux-mêmes.
+            Il utilise uniquement des <em>données ADS-B publiques</em> transmises par les aéronefs eux-mêmes
+            et les <em>données sismiques publiques</em> de l'USGS.
         </div>
     </div>
 
@@ -373,7 +444,7 @@ main { padding: 1.5rem 0 3rem; }
         <div class="fr-kpi fr-kpi--danger">
             <div class="fr-kpi__label"><i class="fas fa-fire"></i> Séismes (24 h)</div>
             <div class="fr-kpi__value" id="kpiQuakes">—</div>
-            <span class="fr-kpi__trend" id="kpiQuakesTrend">—</span>
+            <span class="fr-kpi__trend" id="kpiQuakesTrend">USGS M ≥ 2.5</span>
         </div>
     </div>
 
@@ -422,6 +493,10 @@ main { padding: 1.5rem 0 3rem; }
     <div class="fr-card" id="mapAnchor" style="margin-bottom:1rem;">
         <div class="fr-card__body" style="padding:0;">
             <div id="map" style="height:500px;width:100%;"></div>
+        </div>
+        <div class="fr-card__footer">
+            <span><i class="fas fa-info-circle"></i> Aéronefs : points bleus (civils) / magenta (militaires) • Séismes : cercles rouges proportionnels à la magnitude</span>
+            <span id="mapCounts">—</span>
         </div>
     </div>
 
@@ -473,6 +548,40 @@ main { padding: 1.5rem 0 3rem; }
         </div>
     </div>
 
+    <!-- SECTION SÉISMES -->
+    <h2 class="fr-section-title" id="quakesAnchor"><i class="fas fa-fire"></i> Séismes (24 dernières heures)</h2>
+    <div class="fr-card">
+        <div class="fr-card__header">
+            <div class="fr-card__title"><i class="fas fa-globe"></i> USGS — M ≥ 2.5</div>
+            <div class="fr-search">
+                <i class="fas fa-magnifying-glass"></i>
+                <input type="text" id="quakeSearch" placeholder="Rechercher un lieu…" oninput="filterQuakes()">
+            </div>
+        </div>
+        <div class="fr-card__body" style="padding:0;">
+            <div class="fr-table-wrap">
+                <table class="fr-table">
+                    <thead>
+                        <tr>
+                            <th onclick="sortQuakes(0)">Magnitude ↕</th>
+                            <th onclick="sortQuakes(1)">Lieu ↕</th>
+                            <th onclick="sortQuakes(2)">Profondeur ↕</th>
+                            <th onclick="sortQuakes(3)">Heure ↕</th>
+                            <th>Détails</th>
+                        </tr>
+                    </thead>
+                    <tbody id="quakesBody">
+                        <tr><td colspan="5" style="text-align:center;padding:1.5rem;">Chargement initial…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="fr-card__footer">
+            <span id="quakeCount">—</span>
+            <span>Données USGS publiques — <a href="https://earthquake.usgs.gov" target="_blank" rel="noopener">earthquake.usgs.gov</a></span>
+        </div>
+    </div>
+
 </main>
 
 <footer class="fr-footer">
@@ -484,7 +593,7 @@ main { padding: 1.5rem 0 3rem; }
                 <div style="font-size:0.75rem;font-weight:400;color:var(--text-mention);">Outil tiers indépendant — non gouvernemental</div>
             </div>
         </div>
-        <div>Hébergement : GitHub Pages · Source : PocketWorld via Cloudflare Worker · Séismes : USGS · © 2026 MIT</div>
+        <div>Hébergement : GitHub Pages · Sources : PocketWorld via Cloudflare Worker + USGS · © 2026 MIT</div>
     </div>
 </footer>
 
@@ -503,8 +612,6 @@ main { padding: 1.5rem 0 3rem; }
 
 /* ============================================================
    CONFIGURATION
-   - PocketWorld via Worker Cloudflare (ajoute le CORS manquant)
-   - USGS en direct (CORS ouvert nativement)
    ============================================================ */
 const PROXY_URL = 'https://radar-proxy.gunout.workers.dev/?url=';
 const POCKETWORLD_URL = 'https://pocketworld.org/api/flights?wire=1&bbox=-5.5,41,9.8,51.5';
@@ -517,10 +624,15 @@ const state = {
     data: { flights: [], military: [], quakes: [] },
     tableRows: [],
     _renderedRows: [],
+    quakeRows: [],
+    _renderedQuakes: [],
     sortDir: {},
+    quakeSortDir: {},
     lastSource: null,
     map: null,
     drawnItems: null,
+    aircraftLayer: null,
+    quakesLayer: null,
     geoFilter: { active: false, bounds: null },
     updateInterval: null,
     radar: {
@@ -581,7 +693,6 @@ async function fetchJSON(url, timeoutMs = 20000) {
 
 /* ============================================================
    FETCH AÉRONEFS — PocketWorld via Worker Cloudflare
-   Format : { flight_fields: [...], flight_rows: [[...], ...] }
    ============================================================ */
 async function fetchFlights() {
     console.log('[flights] PocketWorld (via Worker Cloudflare)…');
@@ -629,17 +740,42 @@ async function fetchFlights() {
 }
 
 /* ============================================================
-   FETCH SÉISMES — USGS (CORS ouvert, direct)
+   FETCH SÉISMES — USGS (toutes les données)
    ============================================================ */
 async function fetchEarthquakes() {
     try {
         const j = await fetchJSON(USGS_URL);
         console.log('[USGS] ✓ ' + j.features.length + ' séismes');
         return (j.features || []).map(f => ({
-            id: f.id, time: new Date(f.properties.time),
-            mag: f.properties.mag, place: f.properties.place,
-            lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0],
-            url: f.properties.url
+            id: f.id,
+            time: new Date(f.properties.time),
+            updated: new Date(f.properties.updated),
+            mag: f.properties.mag,
+            magType: f.properties.magType,
+            place: f.properties.place,
+            type: f.properties.type,
+            title: f.properties.title,
+            status: f.properties.status,
+            tsunami: f.properties.tsunami === 1,
+            sig: f.properties.sig,
+            felt: f.properties.felt,
+            cdi: f.properties.cdi,
+            mmi: f.properties.mmi,
+            alert: f.properties.alert,
+            nst: f.properties.nst,
+            dmin: f.properties.dmin,
+            rms: f.properties.rms,
+            gap: f.properties.gap,
+            net: f.properties.net,
+            code: f.properties.code,
+            ids: f.properties.ids,
+            sources: f.properties.sources,
+            types: f.properties.types,
+            url: f.properties.url,
+            detail: f.properties.detail,
+            lat: f.geometry.coordinates[1],
+            lon: f.geometry.coordinates[0],
+            depth: f.geometry.coordinates[2]
         })).sort((a, b) => b.time - a.time);
     } catch (e) {
         console.warn('[USGS] ✗ ' + e.message);
@@ -658,7 +794,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /* ============================================================
-   REFRESH — avec conservation des données en cas d'échec
+   REFRESH
    ============================================================ */
 async function refreshAll() {
     setStatus('wait', 'Mise à jour…');
@@ -682,6 +818,7 @@ async function refreshAll() {
     updateKPIs();
     updateCharts();
     updateTable();
+    updateQuakesTable();
     updateMapMarkers();
 
     const ok = [flights.length > 0, quakes.length > 0].filter(Boolean).length;
@@ -696,11 +833,11 @@ async function refreshAll() {
         setStatus('error', 'Hors ligne');
     } else if (ok < 2) {
         document.getElementById('apiStatus').innerHTML =
-            `<i class="fas fa-satellite-dish"></i> Sources : <strong>${ok}/2 actives</strong> · ${flights.length} aéronefs`;
+            `<i class="fas fa-satellite-dish"></i> Sources : <strong>${ok}/2 actives</strong> · ${flights.length} aéronefs · ${quakes.length} séismes`;
         setStatus('wait', 'Connexion partielle');
     } else {
         document.getElementById('apiStatus').innerHTML =
-            `<i class="fas fa-satellite-dish"></i> Sources : <strong>${ok}/2 actives</strong> · ${flights.length} aéronefs`;
+            `<i class="fas fa-satellite-dish"></i> Sources : <strong>${ok}/2 actives</strong> · ${flights.length} aéronefs · ${quakes.length} séismes`;
         setStatus('ok', 'Temps réel actif');
     }
 
@@ -709,6 +846,8 @@ async function refreshAll() {
     document.getElementById('radarLastUpdate').textContent = 'MAJ : ' + now;
     document.getElementById('radarSource').textContent = 'Source : ' + (state.lastSource || '—');
     document.getElementById('radarTargetCount').textContent = flights.length;
+    document.getElementById('mapCounts').textContent =
+        `${flights.length} aéronefs · ${quakes.length} séismes`;
 }
 
 function setStatus(type, text) {
@@ -855,13 +994,16 @@ function cycleRadarRange() {
 function toggleRadarLabels() { state.radar.showLabels = !state.radar.showLabels; }
 
 /* ============================================================
-   CARTE
+   CARTE — avec séismes
    ============================================================ */
 function initMap() {
     state.map = L.map('map').setView([46.6, 2.5], 5);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap', maxZoom: 18
     }).addTo(state.map);
+
+    state.aircraftLayer = L.layerGroup().addTo(state.map);
+    state.quakesLayer = L.layerGroup().addTo(state.map);
 
     state.drawnItems = new L.FeatureGroup();
     state.map.addLayer(state.drawnItems);
@@ -891,6 +1033,26 @@ function initMap() {
         document.getElementById('geoFilterStatus').textContent = 'Inactif';
         applyGeoFilter();
     });
+
+    // Légende personnalisée
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = function() {
+        const div = L.DomUtil.create('div', 'map-legend');
+        div.innerHTML = `
+            <div class="map-legend__title">Légende</div>
+            <div class="map-legend__item">
+                <span class="map-legend__dot map-legend__dot--civil"></span> Aéronef civil
+            </div>
+            <div class="map-legend__item">
+                <span class="map-legend__dot map-legend__dot--mil"></span> Aéronef militaire
+            </div>
+            <div class="map-legend__item">
+                <span class="map-legend__dot map-legend__dot--quake"></span> Séisme (taille ∝ magnitude)
+            </div>
+        `;
+        return div;
+    };
+    legend.addTo(state.map);
 
     setTimeout(() => state.map.invalidateSize(), 300);
 }
@@ -945,7 +1107,11 @@ function updateKPIs() {
 
     document.getElementById('kpiQuakes').textContent = quakes.length;
     const strong = quakes.filter(q => q.mag >= 4.5).length;
-    document.getElementById('kpiQuakesTrend').textContent = strong > 0 ? strong + ' ≥ M4.5' : 'faible';
+    const tsunamis = quakes.filter(q => q.tsunami).length;
+    let trend = 'faible';
+    if (tsunamis > 0) trend = '⚠️ ' + tsunamis + ' tsunami';
+    else if (strong > 0) trend = strong + ' ≥ M4.5';
+    document.getElementById('kpiQuakesTrend').textContent = trend;
 
     if (withAlt.length) {
         const avgAlt = Math.round(withAlt.reduce((s, f) => s + f.alt, 0) / withAlt.length);
@@ -1029,7 +1195,7 @@ function chartOpts() {
 }
 
 /* ============================================================
-   TABLEAU
+   TABLEAU AÉRONEFS
    ============================================================ */
 function updateTable() {
     if (state.geoFilter.active) return applyGeoFilter();
@@ -1069,7 +1235,7 @@ function filterTable() {
     const q = document.getElementById('tableSearch').value.trim().toLowerCase();
     if (!q) return renderTable(state.tableRows);
     renderTable(state.tableRows.filter(r =>
-        (r.callsign + ' ' + r.typecode + ' ' + r.country).toLowerCase().includes(q)
+        (r.callsign + ' ' + r.typecode).toLowerCase().includes(q)
     ));
 }
 
@@ -1090,6 +1256,70 @@ function sortTable(col) {
 }
 
 /* ============================================================
+   TABLEAU SÉISMES
+   ============================================================ */
+function updateQuakesTable() {
+    state.quakeRows = state.data.quakes.map(q => ({
+        mag: q.mag, place: q.place || '—', depth: q.depth,
+        time: q.time, tsunami: q.tsunami, sig: q.sig,
+        url: q.url, id: q.id
+    }));
+    renderQuakesTable(state.quakeRows);
+}
+
+function renderQuakesTable(rows) {
+    state._renderedQuakes = rows;
+    const tbody = document.getElementById('quakesBody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:1.5rem;">Aucun séisme détecté</td></tr>';
+        document.getElementById('quakeCount').textContent = '0 séisme';
+        return;
+    }
+    tbody.innerHTML = rows.slice(0, 100).map((q, i) => {
+        let magColor = '#CECECE';
+        if (q.mag >= 5) magColor = '#8B0000';
+        else if (q.mag >= 4) magColor = '#E1000F';
+        else if (q.mag >= 3) magColor = '#FF6600';
+        else if (q.mag >= 2.5) magColor = '#FFA500';
+
+        return `
+            <tr onclick="showQuakeDetail(${i})">
+                <td><strong style="color:${magColor};">M${q.mag != null ? q.mag.toFixed(1) : '?'}</strong> ${q.tsunami ? '🌊' : ''}</td>
+                <td>${escapeHtml(q.place)}</td>
+                <td>${q.depth != null ? q.depth.toFixed(1) + ' km' : '—'}</td>
+                <td>${q.time.toLocaleString('fr-FR')}</td>
+                <td><a href="${q.url}" target="_blank" rel="noopener" onclick="event.stopPropagation();" class="fr-tag fr-tag--info">USGS ↗</a></td>
+            </tr>
+        `;
+    }).join('');
+    document.getElementById('quakeCount').textContent = rows.length + ' séisme' + (rows.length > 1 ? 's' : '');
+}
+
+function filterQuakes() {
+    const q = document.getElementById('quakeSearch').value.trim().toLowerCase();
+    if (!q) return renderQuakesTable(state.quakeRows);
+    renderQuakesTable(state.quakeRows.filter(r =>
+        (r.place || '').toLowerCase().includes(q)
+    ));
+}
+
+function sortQuakes(col) {
+    const keys = ['mag', 'place', 'depth', 'time'];
+    const key = keys[col];
+    state.quakeSortDir[col] = !state.quakeSortDir[col];
+    const dir = state.quakeSortDir[col] ? 1 : -1;
+    const sorted = [...state.quakeRows].sort((a, b) => {
+        const av = a[key], bv = b[key];
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+        if (av instanceof Date && bv instanceof Date) return (av - bv) * dir;
+        return String(av).localeCompare(String(bv)) * dir;
+    });
+    renderQuakesTable(sorted);
+}
+
+/* ============================================================
    MODALES
    ============================================================ */
 function showDetail(i) {
@@ -1100,7 +1330,6 @@ function showDetail(i) {
         <table class="fr-table"><tbody>
             <tr><td><strong>Type d'appareil</strong></td><td>${escapeHtml(r.typecode || '—')}</td></tr>
             <tr><td><strong>Immatriculation</strong></td><td>${escapeHtml(r.registration || '—')}</td></tr>
-            <tr><td><strong>Pays d'origine</strong></td><td>${escapeHtml(r.country || '—')}</td></tr>
             <tr><td><strong>Statut</strong></td><td>${r.military
                 ? '<span class="fr-tag fr-tag--mil">MILITAIRE (probable)</span>'
                 : '<span class="fr-tag fr-tag--info">CIVIL</span>'}</td></tr>
@@ -1108,12 +1337,38 @@ function showDetail(i) {
             <tr><td><strong>Vitesse</strong></td><td>${r.vel != null ? r.vel.toLocaleString('fr-FR') + ' km/h' : '—'}</td></tr>
             <tr><td><strong>Position</strong></td><td>${r.lat != null ? r.lat.toFixed(3) + '°, ' + r.lon.toFixed(3) + '°' : '—'}</td></tr>
             <tr><td><strong>ICAO 24 bits</strong></td><td><code>${escapeHtml(r.icao24 || '—')}</code></td></tr>
+        </tbody></table>`;
+    document.getElementById('detailModal').classList.add('active');
+}
+
+function showQuakeDetail(i) {
+    const q = state._renderedQuakes[i];
+    if (!q) return;
+
+    let magColor = '#CECECE';
+    if (q.mag >= 5) magColor = '#8B0000';
+    else if (q.mag >= 4) magColor = '#E1000F';
+    else if (q.mag >= 3) magColor = '#FF6600';
+
+    document.getElementById('modalTitle').textContent = '🌍 Séisme M' + (q.mag != null ? q.mag.toFixed(1) : '?');
+    document.getElementById('modalBody').innerHTML = `
+        <div style="border-left:4px solid ${magColor}; padding-left:12px; margin-bottom:16px;">
+            <div style="font-size:1.5rem; font-weight:700; color:${magColor};">M${q.mag != null ? q.mag.toFixed(1) : '?'}</div>
+            <div style="font-size:0.9rem; color:var(--text-mention);">${escapeHtml(q.place)}</div>
+            ${q.tsunami ? '<div style="margin-top:8px;"><span class="fr-tag fr-tag--tsunami">⚠️ ALERTE TSUNAMI</span></div>' : ''}
+        </div>
+        <table class="fr-table"><tbody>
+            <tr><td><strong>Heure (locale)</strong></td><td>${q.time.toLocaleString('fr-FR')}</td></tr>
+            <tr><td><strong>Profondeur</strong></td><td>${q.depth != null ? q.depth.toFixed(1) + ' km' : '—'}</td></tr>
+            <tr><td><strong>Magnitude</strong></td><td>M${q.mag != null ? q.mag.toFixed(1) : '?'}</td></tr>
+            <tr><td><strong>Signification</strong></td><td>${q.sig || '—'}</td></tr>
+            <tr><td><strong>Alerte tsunami</strong></td><td>${q.tsunami ? '🔴 OUI' : '🟢 NON'}</td></tr>
+            <tr><td><strong>ID USGS</strong></td><td><code>${escapeHtml(q.id)}</code></td></tr>
         </tbody></table>
-        <p style="font-size:0.75rem;color:var(--text-mention);margin-top:1rem;">
-            <i class="fas fa-circle-info"></i>
-            Données ADS-B publiques via PocketWorld. La classification « militaire » est basée sur
-            le code type et l'immatriculation — elle est indicative et non officielle.
-        </p>`;
+        <a href="${q.url}" target="_blank" rel="noopener" class="fr-btn fr-btn--ghost fr-btn--sm" style="margin-top:12px; display:inline-flex;">
+            <i class="fas fa-external-link-alt"></i> Voir sur USGS
+        </a>
+    `;
     document.getElementById('detailModal').classList.add('active');
 }
 
@@ -1122,13 +1377,13 @@ function showAbout() {
     document.getElementById('modalBody').innerHTML = `
         <p><strong>Radar Aérien France</strong> est un outil tiers <strong>indépendant</strong>,
         non édité, non approuvé et non affilié à l'État français ou à l'Armée de l'Air.</p>
-        <p style="margin-top:0.75rem;">Il agrège uniquement des <strong>données ADS-B publiques</strong> :</p>
+        <p style="margin-top:0.75rem;">Il agrège uniquement des <strong>données publiques</strong> :</p>
         <ul style="margin:0.75rem 0 0 1.25rem;">
-            <li><strong>PocketWorld</strong> — agrégateur (OpenSky + adsb.fi + adsb.lol), via Worker Cloudflare</li>
+            <li><strong>PocketWorld</strong> — ADS-B (OpenSky + adsb.fi + adsb.lol), via Worker Cloudflare</li>
             <li><strong>USGS</strong> — séismes M ≥ 2.5 des dernières 24 h</li>
         </ul>
         <p style="margin-top:0.75rem;font-size:0.8rem;color:var(--text-mention);">
-            Fréquence de rafraîchissement : 2 minutes.
+            Fréquence de rafraîchissement : 2 minutes.<br>
             Code source : MIT © 2026.
         </p>`;
     document.getElementById('detailModal').classList.add('active');
@@ -1141,21 +1396,97 @@ document.getElementById('detailModal').addEventListener('click', e => {
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
 /* ============================================================
-   MARQUEURS CARTE
+   MARQUEURS CARTE — AÉRONEFS + SÉISMES
    ============================================================ */
 function updateMapMarkers() {
     if (!state.map) return;
-    if (state._markers) state._markers.forEach(m => state.map.removeLayer(m));
-    state._markers = [];
-    [...state.data.military, ...state.data.flights].slice(0, 200).forEach(f => {
-        if (f.lat == null) return;
+
+    // AÉRONEFS
+    if (state.aircraftLayer) state.aircraftLayer.clearLayers();
+    const aircraft = [...state.data.military, ...state.data.flights];
+
+    aircraft.forEach(f => {
+        if (f.lat == null || f.lon == null) return;
         const color = f.military ? '#FF00FF' : '#000091';
-        const m = L.circleMarker([f.lat, f.lon], {
-            radius: 3, color, fillColor: color, fillOpacity: 0.7, weight: 1
-        }).addTo(state.map);
-        m.bindPopup(`<strong style="color:${color};">${f.military ? '⚔' : '✈'} ${escapeHtml(f.callsign)}</strong><br>${escapeHtml(f.typecode)}<br>Alt : ${f.alt != null ? f.alt + ' m' : '—'}`);
-        state._markers.push(m);
+        L.circleMarker([f.lat, f.lon], {
+            radius: 4, color: color, fillColor: color,
+            fillOpacity: 0.8, weight: 1
+        })
+        .bindPopup(`
+            <strong style="color:${color};">
+                ${f.military ? '⚔' : '✈'} ${escapeHtml(f.callsign)}
+            </strong><br>
+            <span style="font-size:0.85rem;">
+                Type : ${escapeHtml(f.typecode)}<br>
+                Altitude : ${f.alt != null ? f.alt.toLocaleString('fr-FR') + ' m' : '—'}<br>
+                Vitesse : ${f.vel != null ? f.vel.toLocaleString('fr-FR') + ' km/h' : '—'}
+            </span>
+        `)
+        .addTo(state.aircraftLayer);
     });
+
+    // SÉISMES
+    if (state.quakesLayer) state.quakesLayer.clearLayers();
+    const quakes = state.data.quakes || [];
+
+    quakes.forEach(q => {
+        if (q.lat == null || q.lon == null) return;
+
+        // Rayon proportionnel à la magnitude
+        const radiusMeters = Math.max(10000, Math.pow(q.mag, 3) * 800);
+
+        // Couleur selon la magnitude
+        let color = '#FFA500';
+        if (q.mag >= 5) color = '#8B0000';
+        else if (q.mag >= 4) color = '#E1000F';
+        else if (q.mag >= 3) color = '#FF6600';
+
+        // Bordure spéciale pour les tsunamis
+        const weight = q.tsunami ? 4 : 2;
+        const dashArray = q.tsunami ? '5,5' : null;
+
+        const circle = L.circle([q.lat, q.lon], {
+            radius: radiusMeters,
+            color: color,
+            fillColor: color,
+            fillOpacity: 0.25,
+            weight: weight,
+            dashArray: dashArray
+        });
+
+        circle.bindPopup(`
+            <div class="quake-popup">
+                <div class="quake-popup__title" style="color:${color};">
+                    🌍 Séisme M${q.mag != null ? q.mag.toFixed(1) : '?'}
+                    ${q.tsunami ? ' 🌊' : ''}
+                </div>
+                <div class="quake-popup__row">
+                    <strong>Lieu :</strong>
+                    <span>${escapeHtml(q.place || '—')}</span>
+                </div>
+                <div class="quake-popup__row">
+                    <strong>Heure :</strong>
+                    <span>${q.time.toLocaleString('fr-FR')}</span>
+                </div>
+                <div class="quake-popup__row">
+                    <strong>Profondeur :</strong>
+                    <span>${q.depth != null ? q.depth.toFixed(1) + ' km' : '—'}</span>
+                </div>
+                <div class="quake-popup__row">
+                    <strong>Magnitude :</strong>
+                    <span>M${q.mag != null ? q.mag.toFixed(1) : '?'}</span>
+                </div>
+                ${q.tsunami ? '<div style="margin-top:6px;padding:4px;background:#FFD700;color:#8B0000;border-radius:3px;font-weight:700;text-align:center;">⚠️ ALERTE TSUNAMI</div>' : ''}
+                <a href="${q.url}" target="_blank" rel="noopener" class="quake-popup__link">
+                    <i class="fas fa-external-link-alt"></i> Voir sur USGS
+                </a>
+            </div>
+        `);
+
+        state.quakesLayer.addLayer(circle);
+    });
+
+    console.log(`[Carte] ${aircraft.length} aéronefs + ${quakes.length} séismes affichés`);
 }
 
 /* ============================================================
@@ -1172,17 +1503,25 @@ function exportCSV() {
         f.alt != null ? f.alt : '',
         f.vel != null ? f.vel : ''
     ]);
+    const qHeaders = ['Magnitude', 'Lieu', 'Profondeur (km)', 'Heure', 'Tsunami', 'URL'];
+    const qRows = state.data.quakes.map(q => [
+        q.mag, q.place, q.depth, q.time.toISOString(), q.tsunami ? 'OUI' : 'NON', q.url
+    ]);
     const escape = (v) => {
         const s = String(v == null ? '' : v);
         return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     };
     const lines = [
         '# RAPPORT RADAR AÉRIEN — ' + new Date().toLocaleString('fr-FR'),
-        '# Outil tiers non gouvernemental — données ADS-B publiques',
+        '# Outil tiers non gouvernemental — données ADS-B + USGS publiques',
         '',
         '## AÉRONEFS (' + allAir.length + ')',
         headers.join(','),
-        ...rows.map(r => r.map(escape).join(','))
+        ...rows.map(r => r.map(escape).join(',')),
+        '',
+        '## SÉISMES (' + state.data.quakes.length + ')',
+        qHeaders.join(','),
+        ...qRows.map(r => r.map(escape).join(','))
     ];
     const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -1212,7 +1551,7 @@ function exportPDF() {
     doc.text('RAPPORT RADAR AÉRIEN', 14, 12);
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    doc.text('Outil tiers non gouvernemental — Données ADS-B publiques', 14, 19);
+    doc.text('Outil tiers non gouvernemental — Données ADS-B + USGS publiques', 14, 19);
 
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(10);
@@ -1241,12 +1580,12 @@ function exportPDF() {
         y += 6;
         doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
-        doc.text('AÉRONEFS DÉTECTÉS (extrait de 25)', 14, y);
+        doc.text('AÉRONEFS DÉTECTÉS (extrait de 20)', 14, y);
         y += 4;
         doc.autoTable({
             startY: y,
             head: [['Indicatif', 'Type', 'Statut', 'Altitude', 'Vitesse']],
-            body: allAir.slice(0, 25).map(f => [
+            body: allAir.slice(0, 20).map(f => [
                 f.callsign, f.typecode || '-', f.military ? 'MIL' : 'CIV',
                 f.alt != null ? nf(f.alt) + ' m' : '-',
                 f.vel != null ? nf(f.vel) + ' km/h' : '-'
@@ -1263,15 +1602,17 @@ function exportPDF() {
         if (y > 235) { doc.addPage(); y = 20; }
         doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
-        doc.text('SÉISMES 24 H (extrait de 15)', 14, y);
+        doc.text('SÉISMES 24 H (extrait de 20)', 14, y);
         y += 4;
         doc.autoTable({
             startY: y,
-            head: [['Mag.', 'Lieu', 'Heure locale']],
-            body: state.data.quakes.slice(0, 15).map(q => [
+            head: [['Mag.', 'Lieu', 'Profondeur', 'Heure', 'Tsunami']],
+            body: state.data.quakes.slice(0, 20).map(q => [
                 q.mag != null ? 'M' + q.mag.toFixed(1) : '-',
                 q.place || '-',
-                q.time.toLocaleTimeString('fr-FR')
+                q.depth != null ? q.depth.toFixed(1) + ' km' : '-',
+                q.time.toLocaleString('fr-FR'),
+                q.tsunami ? '⚠️ OUI' : 'NON'
             ]),
             theme: 'striped',
             headStyles: { fillColor: [225, 0, 15] },
@@ -1285,7 +1626,7 @@ function exportPDF() {
         doc.setPage(p);
         doc.setFontSize(8);
         doc.setTextColor(120);
-        doc.text('Outil tiers indépendant — données ADS-B publiques — © 2026 MIT', 14, 290);
+        doc.text('Outil tiers indépendant — données ADS-B + USGS — © 2026 MIT', 14, 290);
         doc.text('Page ' + p + '/' + pages, 196, 290, { align: 'right' });
     }
 
@@ -1299,7 +1640,7 @@ document.querySelectorAll('.fr-nav__link').forEach(btn => {
     btn.addEventListener('click', () => {
         document.querySelectorAll('.fr-nav__link').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        const targets = { overview: null, radar: 'radarAnchor', map: 'mapAnchor' };
+        const targets = { overview: null, radar: 'radarAnchor', map: 'mapAnchor', quakes: 'quakesAnchor' };
         const id = targets[btn.dataset.tab];
         if (id) {
             const el = document.getElementById(id);
